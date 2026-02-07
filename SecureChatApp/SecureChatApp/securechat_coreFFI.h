@@ -63,6 +63,23 @@ typedef struct RustCallStatus {
 typedef void (*UniFfiRustFutureContinuation)(void * _Nonnull, int8_t);
 
 // Scaffolding functions
+void uniffi_securechat_core_fn_free_networkmanager(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_securechat_core_fn_method_networkmanager_get_peer_id(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_securechat_core_fn_method_networkmanager_get_peers(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+int8_t uniffi_securechat_core_fn_method_networkmanager_is_running(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_securechat_core_fn_method_networkmanager_poll_event(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+void uniffi_securechat_core_fn_method_networkmanager_start(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+void uniffi_securechat_core_fn_method_networkmanager_stop(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+void*_Nonnull uniffi_securechat_core_fn_func_create_network_manager(RustCallStatus *_Nonnull out_status
+    
+);
 RustBuffer uniffi_securechat_core_fn_func_generate_identity(RustCallStatus *_Nonnull out_status
     
 );
@@ -186,6 +203,9 @@ void ffi_securechat_core_rust_future_free_void(void* _Nonnull handle
 );
 void ffi_securechat_core_rust_future_complete_void(void* _Nonnull handle, RustCallStatus *_Nonnull out_status
 );
+uint16_t uniffi_securechat_core_checksum_func_create_network_manager(void
+    
+);
 uint16_t uniffi_securechat_core_checksum_func_generate_identity(void
     
 );
@@ -196,6 +216,24 @@ uint16_t uniffi_securechat_core_checksum_func_get_public_key_hex(void
     
 );
 uint16_t uniffi_securechat_core_checksum_func_perform_key_exchange(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_networkmanager_get_peer_id(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_networkmanager_get_peers(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_networkmanager_is_running(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_networkmanager_poll_event(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_networkmanager_start(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_networkmanager_stop(void
     
 );
 uint32_t ffi_securechat_core_uniffi_contract_version(void

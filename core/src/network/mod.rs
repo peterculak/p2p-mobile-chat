@@ -8,9 +8,11 @@
 mod node;
 mod behaviour;
 mod config;
+pub mod api;
 
 pub use node::{P2PNode, NodeEvent, PeerInfo};
 pub use config::NetworkConfig;
+pub use api::{NetworkManager, NetworkError, NetworkEvent, create_network_manager};
 
 #[cfg(test)]
 mod tests;

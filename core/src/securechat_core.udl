@@ -5,17 +5,66 @@ namespace securechat_core {
     string get_public_key_hex([ByRef] Identity identity);
     string get_public_key_fingerprint([ByRef] Identity identity);
     
-    // Key exchange (for future use)
+    // Key exchange
     SharedSecret perform_key_exchange([ByRef] Identity my_identity, string their_public_key_hex);
+    
+    // P2P Network Manager (singleton for iOS)
+    NetworkManager create_network_manager();
 };
 
 // A user's cryptographic identity
 dictionary Identity {
     string public_key_hex;
-    string private_key_hex;  // Only stored locally, never transmitted
+    string private_key_hex;
 };
 
 // Result of Diffie-Hellman key exchange
 dictionary SharedSecret {
     string secret_hex;
+};
+
+// Information about a discovered peer
+dictionary PeerInfo {
+    string peer_id;
+    sequence<string> addresses;
+};
+
+// Events from the P2P network
+[Enum]
+interface NetworkEvent {
+    Listening(string address);
+    PeerDiscovered(PeerInfo peer);
+    PeerDisconnected(string peer_id);
+    Error(string message);
+};
+
+// Network manager for P2P operations
+interface NetworkManager {
+    // Get our peer ID
+    string get_peer_id();
+    
+    // Start the P2P node
+    [Throws=NetworkError]
+    void start();
+    
+    // Stop the P2P node
+    void stop();
+    
+    // Check if running
+    boolean is_running();
+    
+    // Get connected peers
+    sequence<PeerInfo> get_peers();
+    
+    // Poll for next event (non-blocking, returns null if no event)
+    NetworkEvent? poll_event();
+};
+
+// Network errors
+[Error]
+enum NetworkError {
+    "AlreadyRunning",
+    "NotRunning",
+    "StartFailed",
+    "ConnectionFailed",
 };

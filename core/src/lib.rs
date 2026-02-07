@@ -11,6 +11,10 @@ use sha2::{Sha256, Digest};
 // Modules
 pub mod network;
 
+// Re-export network API types for UniFFI
+pub use network::{NetworkManager, NetworkError, create_network_manager};
+pub use network::api::{NetworkEvent, PeerInfo};
+
 // Include UniFFI scaffolding
 uniffi::include_scaffolding!("securechat_core");
 

@@ -297,6 +297,27 @@ private func uniffiCheckCallStatus(
 // Public interface members begin here.
 
 
+fileprivate struct FfiConverterBool : FfiConverter {
+    typealias FfiType = Int8
+    typealias SwiftType = Bool
+
+    public static func lift(_ value: Int8) throws -> Bool {
+        return value != 0
+    }
+
+    public static func lower(_ value: Bool) -> Int8 {
+        return value ? 1 : 0
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Bool, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
 fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
@@ -333,6 +354,137 @@ fileprivate struct FfiConverterString: FfiConverter {
         writeInt(&buf, len)
         writeBytes(&buf, value.utf8)
     }
+}
+
+
+public protocol NetworkManagerProtocol {
+    func getPeerId()   -> String
+    func getPeers()   -> [PeerInfo]
+    func isRunning()   -> Bool
+    func pollEvent()   -> NetworkEvent?
+    func start()  throws
+    func stop()  
+    
+}
+
+public class NetworkManager: NetworkManagerProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    deinit {
+        try! rustCall { uniffi_securechat_core_fn_free_networkmanager(pointer, $0) }
+    }
+
+    
+
+    
+    
+
+    public func getPeerId()  -> String {
+        return try!  FfiConverterString.lift(
+            try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_networkmanager_get_peer_id(self.pointer, $0
+    )
+}
+        )
+    }
+
+    public func getPeers()  -> [PeerInfo] {
+        return try!  FfiConverterSequenceTypePeerInfo.lift(
+            try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_networkmanager_get_peers(self.pointer, $0
+    )
+}
+        )
+    }
+
+    public func isRunning()  -> Bool {
+        return try!  FfiConverterBool.lift(
+            try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_networkmanager_is_running(self.pointer, $0
+    )
+}
+        )
+    }
+
+    public func pollEvent()  -> NetworkEvent? {
+        return try!  FfiConverterOptionTypeNetworkEvent.lift(
+            try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_networkmanager_poll_event(self.pointer, $0
+    )
+}
+        )
+    }
+
+    public func start() throws {
+        try 
+    rustCallWithError(FfiConverterTypeNetworkError.lift) {
+    uniffi_securechat_core_fn_method_networkmanager_start(self.pointer, $0
+    )
+}
+    }
+
+    public func stop()  {
+        try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_networkmanager_stop(self.pointer, $0
+    )
+}
+    }
+}
+
+public struct FfiConverterTypeNetworkManager: FfiConverter {
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = NetworkManager
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NetworkManager {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: NetworkManager, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> NetworkManager {
+        return NetworkManager(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: NetworkManager) -> UnsafeMutableRawPointer {
+        return value.pointer
+    }
+}
+
+
+public func FfiConverterTypeNetworkManager_lift(_ pointer: UnsafeMutableRawPointer) throws -> NetworkManager {
+    return try FfiConverterTypeNetworkManager.lift(pointer)
+}
+
+public func FfiConverterTypeNetworkManager_lower(_ value: NetworkManager) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeNetworkManager.lower(value)
 }
 
 
@@ -391,6 +543,61 @@ public func FfiConverterTypeIdentity_lower(_ value: Identity) -> RustBuffer {
 }
 
 
+public struct PeerInfo {
+    public var peerId: String
+    public var addresses: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(peerId: String, addresses: [String]) {
+        self.peerId = peerId
+        self.addresses = addresses
+    }
+}
+
+
+extension PeerInfo: Equatable, Hashable {
+    public static func ==(lhs: PeerInfo, rhs: PeerInfo) -> Bool {
+        if lhs.peerId != rhs.peerId {
+            return false
+        }
+        if lhs.addresses != rhs.addresses {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(peerId)
+        hasher.combine(addresses)
+    }
+}
+
+
+public struct FfiConverterTypePeerInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PeerInfo {
+        return try PeerInfo(
+            peerId: FfiConverterString.read(from: &buf), 
+            addresses: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PeerInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.peerId, into: &buf)
+        FfiConverterSequenceString.write(value.addresses, into: &buf)
+    }
+}
+
+
+public func FfiConverterTypePeerInfo_lift(_ buf: RustBuffer) throws -> PeerInfo {
+    return try FfiConverterTypePeerInfo.lift(buf)
+}
+
+public func FfiConverterTypePeerInfo_lower(_ value: PeerInfo) -> RustBuffer {
+    return FfiConverterTypePeerInfo.lower(value)
+}
+
+
 public struct SharedSecret {
     public var secretHex: String
 
@@ -435,6 +642,236 @@ public func FfiConverterTypeSharedSecret_lift(_ buf: RustBuffer) throws -> Share
 
 public func FfiConverterTypeSharedSecret_lower(_ value: SharedSecret) -> RustBuffer {
     return FfiConverterTypeSharedSecret.lower(value)
+}
+
+public enum NetworkError {
+
+    
+    
+    // Simple error enums only carry a message
+    case AlreadyRunning(message: String)
+    
+    // Simple error enums only carry a message
+    case NotRunning(message: String)
+    
+    // Simple error enums only carry a message
+    case StartFailed(message: String)
+    
+    // Simple error enums only carry a message
+    case ConnectionFailed(message: String)
+    
+
+    fileprivate static func uniffiErrorHandler(_ error: RustBuffer) throws -> Error {
+        return try FfiConverterTypeNetworkError.lift(error)
+    }
+}
+
+
+public struct FfiConverterTypeNetworkError: FfiConverterRustBuffer {
+    typealias SwiftType = NetworkError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NetworkError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .AlreadyRunning(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .NotRunning(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .StartFailed(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .ConnectionFailed(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: NetworkError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        case .AlreadyRunning(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+        case .NotRunning(_ /* message is ignored*/):
+            writeInt(&buf, Int32(2))
+        case .StartFailed(_ /* message is ignored*/):
+            writeInt(&buf, Int32(3))
+        case .ConnectionFailed(_ /* message is ignored*/):
+            writeInt(&buf, Int32(4))
+
+        
+        }
+    }
+}
+
+
+extension NetworkError: Equatable, Hashable {}
+
+extension NetworkError: Error { }
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+public enum NetworkEvent {
+    
+    case listening(address: String)
+    case peerDiscovered(peer: PeerInfo)
+    case peerDisconnected(peerId: String)
+    case error(message: String)
+}
+
+public struct FfiConverterTypeNetworkEvent: FfiConverterRustBuffer {
+    typealias SwiftType = NetworkEvent
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NetworkEvent {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .listening(
+            address: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .peerDiscovered(
+            peer: try FfiConverterTypePeerInfo.read(from: &buf)
+        )
+        
+        case 3: return .peerDisconnected(
+            peerId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .error(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: NetworkEvent, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .listening(address):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(address, into: &buf)
+            
+        
+        case let .peerDiscovered(peer):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypePeerInfo.write(peer, into: &buf)
+            
+        
+        case let .peerDisconnected(peerId):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(peerId, into: &buf)
+            
+        
+        case let .error(message):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+public func FfiConverterTypeNetworkEvent_lift(_ buf: RustBuffer) throws -> NetworkEvent {
+    return try FfiConverterTypeNetworkEvent.lift(buf)
+}
+
+public func FfiConverterTypeNetworkEvent_lower(_ value: NetworkEvent) -> RustBuffer {
+    return FfiConverterTypeNetworkEvent.lower(value)
+}
+
+
+extension NetworkEvent: Equatable, Hashable {}
+
+
+
+fileprivate struct FfiConverterOptionTypeNetworkEvent: FfiConverterRustBuffer {
+    typealias SwiftType = NetworkEvent?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeNetworkEvent.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeNetworkEvent.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+fileprivate struct FfiConverterSequenceTypePeerInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [PeerInfo]
+
+    public static func write(_ value: [PeerInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePeerInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PeerInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PeerInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePeerInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+public func createNetworkManager()  -> NetworkManager {
+    return try!  FfiConverterTypeNetworkManager.lift(
+        try! rustCall() {
+    uniffi_securechat_core_fn_func_create_network_manager($0)
+}
+    )
 }
 
 public func generateIdentity()  -> Identity {
@@ -488,6 +925,9 @@ private var initializationResult: InitializationResult {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_securechat_core_checksum_func_create_network_manager() != 44264) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_securechat_core_checksum_func_generate_identity() != 29756) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -498,6 +938,24 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_securechat_core_checksum_func_perform_key_exchange() != 16349) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_networkmanager_get_peer_id() != 41202) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_networkmanager_get_peers() != 1542) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_networkmanager_is_running() != 8090) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_networkmanager_poll_event() != 45112) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_networkmanager_start() != 10550) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_networkmanager_stop() != 52514) {
         return InitializationResult.apiChecksumMismatch
     }
 
