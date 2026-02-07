@@ -1,13 +1,13 @@
 # SecureChat P2P Messenger - Development Tasks
 
-## Phase 1: POC Foundation ✅
+## Phase 1: POC Foundation [Complete]
 - [x] Set up Rust core project
 - [x] Add cryptography (key generation)
 - [x] Configure UniFFI for iOS bindings
 - [x] Create basic iOS app
 - [x] Connect iOS to Rust core
 
-## Phase 2: P2P Networking ✅
+## Phase 2: P2P Networking [Complete]
 - [x] Add libp2p dependencies to Cargo.toml
 - [x] Create network module structure
 - [x] Implement P2P node (start/stop)

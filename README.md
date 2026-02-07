@@ -2,7 +2,7 @@
 
 A secure, zero-trust, peer-to-peer messaging app for mobile devices.
 
-## 🎯 Project Goal
+## Project Goal
 
 Build a private messenger with:
 - **No servers** - Pure P2P via Kademlia DHT
@@ -10,43 +10,43 @@ Build a private messenger with:
 - **Metadata privacy** - Onion routing
 - **Native performance** - Rust core + native UI
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│           RUST CORE (Shared)            │
-│  • libp2p (DHT, peer discovery)         │
-│  • Signal Protocol (E2E encryption)     │
-│  • Onion routing (metadata privacy)     │
-└──────────────────┬──────────────────────┘
-                   │ UniFFI bindings
-         ┌─────────┴─────────┐
-         ▼                   ▼
-   ┌───────────┐       ┌───────────┐
-   │    iOS    │       │  Android  │
-   │  SwiftUI  │       │  Compose  │
-   └───────────┘       └───────────┘
++------------------------------------------+
+|           RUST CORE (Shared)             |
+|  - libp2p (DHT, peer discovery)          |
+|  - Signal Protocol (E2E encryption)      |
+|  - Onion routing (metadata privacy)      |
++--------------------+---------------------+
+                     | UniFFI bindings
+         +-----------+-----------+
+         v                       v
+   +-----------+           +-----------+
+   |    iOS    |           |  Android  |
+   |  SwiftUI  |           |  Compose  |
+   +-----------+           +-----------+
 ```
 
-## 📊 Progress
+## Progress
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| 1. Foundation | ✅ Complete | Rust core, UniFFI, iOS app |
-| 2. P2P Networking | ✅ Complete | libp2p, mDNS, Kademlia DHT |
-| 3. Encryption | ⏳ Pending | Signal Protocol |
-| 4. Messaging | ⏳ Pending | Send/receive, offline storage |
-| 5. Privacy | ⏳ Pending | Onion routing |
-| 6. Polish | ⏳ Pending | UI, Android, testing |
+| 1. Foundation | Complete | Rust core, UniFFI, iOS app |
+| 2. P2P Networking | Complete | libp2p, mDNS, Kademlia DHT |
+| 3. Encryption | Pending | Signal Protocol |
+| 4. Messaging | Pending | Send/receive, offline storage |
+| 5. Privacy | Pending | Onion routing |
+| 6. Polish | Pending | UI, Android, testing |
 
-## 🧪 Tests
+## Tests
 
 ```bash
 cd core && cargo test
 # 14 tests passing
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Build Rust core
@@ -60,9 +60,10 @@ cd ../SecureChatApp
 xcodebuild -scheme SecureChatApp -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 ```
 
-## 📁 Structure
+## Structure
 
 ```
+securechat/
 ├── core/                 # Rust library
 │   ├── src/
 │   │   ├── lib.rs       # Crypto functions
@@ -76,6 +77,6 @@ xcodebuild -scheme SecureChatApp -destination 'platform=iOS Simulator,name=iPhon
 └── docs/                 # Documentation
 ```
 
-## 📜 License
+## License
 
 MIT
