@@ -1,0 +1,21 @@
+// UniFFI interface definition
+namespace securechat_core {
+    // Identity management
+    Identity generate_identity();
+    string get_public_key_hex([ByRef] Identity identity);
+    string get_public_key_fingerprint([ByRef] Identity identity);
+    
+    // Key exchange (for future use)
+    SharedSecret perform_key_exchange([ByRef] Identity my_identity, string their_public_key_hex);
+};
+
+// A user's cryptographic identity
+dictionary Identity {
+    string public_key_hex;
+    string private_key_hex;  // Only stored locally, never transmitted
+};
+
+// Result of Diffie-Hellman key exchange
+dictionary SharedSecret {
+    string secret_hex;
+};

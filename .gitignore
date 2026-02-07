@@ -1,0 +1,48 @@
+# Rust
+/core/target/
+**/*.rs.bk
+Cargo.lock
+
+# iOS / Xcode
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.hmap
+*.ipa
+*.xcuserstate
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+.build/
+
+# Generated bindings (can be regenerated)
+/ios-bindings/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# Environment
+.env
+.env.local
+
+# Documentation build
+/docs/build/
+
+# Test artifacts
+*.log

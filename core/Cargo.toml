@@ -1,0 +1,36 @@
+[package]
+name = "securechat_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "securechat_core"
+
+[dependencies]
+# Cryptography
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+
+# UniFFI for Swift/Kotlin bindings
+uniffi = { version = "0.25", features = ["cli"] }
+
+# Async runtime (for libp2p later)
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+[build-dependencies]
+uniffi = { version = "0.25", features = ["build"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
