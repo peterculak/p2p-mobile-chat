@@ -8,12 +8,18 @@ crate-type = ["lib", "staticlib", "cdylib"]
 name = "securechat_core"
 
 [dependencies]
-# Cryptography
+# Cryptography - Signal Protocol
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+curve25519-dalek = "4.1"
+aes-gcm = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
 rand = "0.8"
 sha2 = "0.10"
+sha3 = "0.10"
 hex = "0.4"
+zeroize = { version = "1.7", features = ["derive"] }
 
 # UniFFI for Swift/Kotlin bindings
 uniffi = { version = "0.25", features = ["cli"] }

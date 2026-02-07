@@ -1,7 +1,7 @@
 //! SecureChat Core Library
 //! 
-//! Provides cryptographic identity generation and key exchange
-//! for the P2P messenger.
+//! Provides cryptographic identity generation, key exchange,
+//! Signal Protocol encryption, and P2P networking.
 
 use ed25519_dalek::SigningKey;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -10,10 +10,15 @@ use sha2::{Sha256, Digest};
 
 // Modules
 pub mod network;
+pub mod crypto;
 
 // Re-export network API types for UniFFI
 pub use network::{NetworkManager, NetworkError, create_network_manager};
 pub use network::api::{NetworkEvent, PeerInfo};
+
+// Re-export crypto types
+pub use crypto::{IdentityKeyPair, PreKeyBundle, SignedPreKey, OneTimePreKey};
+pub use crypto::{Session, SessionError, EncryptedMessage};
 
 // Include UniFFI scaffolding
 uniffi::include_scaffolding!("securechat_core");

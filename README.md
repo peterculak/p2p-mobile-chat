@@ -52,10 +52,17 @@ Build a truly private messenger where:
 |-------|--------|-------------|
 | 1. Foundation | Complete | Rust core, UniFFI, iOS app |
 | 2. P2P Networking | Complete | libp2p, mDNS, Kademlia DHT |
-| 3. Encryption | Pending | Signal Protocol |
+| 3. Encryption | Complete | Signal Protocol (X3DH, Double Ratchet) |
 | 4. Messaging | Pending | Send/receive, offline storage |
 | 5. Privacy | Pending | Onion routing |
 | 6. Polish | Pending | UI, Android, testing |
+
+## Tests
+
+```bash
+cd core && cargo test
+# 38 tests passing
+```
 
 ## Quick Start
 
