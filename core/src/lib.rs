@@ -3,10 +3,13 @@
 //! Provides cryptographic identity generation and key exchange
 //! for the P2P messenger.
 
-use ed25519_dalek::{SigningKey, VerifyingKey};
-use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
+use ed25519_dalek::SigningKey;
+use x25519_dalek::{PublicKey, StaticSecret};
 use rand::rngs::OsRng;
 use sha2::{Sha256, Digest};
+
+// Modules
+pub mod network;
 
 // Include UniFFI scaffolding
 uniffi::include_scaffolding!("securechat_core");
