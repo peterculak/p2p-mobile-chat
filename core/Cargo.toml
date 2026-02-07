@@ -60,3 +60,7 @@ uniffi = { version = "0.25", features = ["build"] }
 [[bin]]
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
+
+[[bin]]
+name = "p2p-test"
+path = "src/bin/p2p-test.rs"

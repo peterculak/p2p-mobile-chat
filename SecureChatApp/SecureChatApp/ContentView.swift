@@ -18,16 +18,23 @@ extension LinearGradient {
     )
 }
 
-// MARK: - Identity View Model
-class IdentityViewModel: ObservableObject {
+// MARK: - App View Model
+class AppViewModel: ObservableObject {
     @Published var identity: Identity?
     @Published var fingerprint: String = ""
     @Published var isGenerating: Bool = false
     
+    // Network state
+    @Published var networkManager: NetworkManager?
+    @Published var isNetworkRunning: Bool = false
+    @Published var discoveredPeers: [PeerInfo] = []
+    @Published var listeningAddress: String = ""
+    @Published var peerId: String = ""
+    
+    private var pollTimer: Timer?
+    
     func generateNewIdentity() {
         isGenerating = true
-        
-        // Add slight delay for animation effect
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             let newIdentity = generateIdentity()
             self?.identity = newIdentity
@@ -35,16 +42,78 @@ class IdentityViewModel: ObservableObject {
             self?.isGenerating = false
         }
     }
+    
+    func startNetwork() {
+        if networkManager == nil {
+            networkManager = createNetworkManager()
+            peerId = networkManager?.getPeerId() ?? ""
+        }
+        
+        do {
+            try networkManager?.start()
+            isNetworkRunning = true
+            startPolling()
+        } catch {
+            print("Failed to start network: \(error)")
+        }
+    }
+    
+    func stopNetwork() {
+        networkManager?.stop()
+        isNetworkRunning = false
+        stopPolling()
+        discoveredPeers = []
+        listeningAddress = ""
+    }
+    
+    private func startPolling() {
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.pollEvents()
+        }
+    }
+    
+    private func stopPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+    }
+    
+    private func pollEvents() {
+        guard let manager = networkManager else { return }
+        
+        while let event = manager.pollEvent() {
+            DispatchQueue.main.async { [weak self] in
+                self?.handleEvent(event)
+            }
+        }
+    }
+    
+    private func handleEvent(_ event: NetworkEvent) {
+        switch event {
+        case .listening(let address):
+            listeningAddress = address
+        case .peerDiscovered(let peer):
+            if !discoveredPeers.contains(where: { $0.peerId == peer.peerId }) {
+                discoveredPeers.append(peer)
+                // Haptic feedback
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.success)
+            }
+        case .peerDisconnected(let peerId):
+            discoveredPeers.removeAll { $0.peerId == peerId }
+        case .error(let message):
+            print("Network error: \(message)")
+        }
+    }
 }
 
-// MARK: - Content View
+// MARK: - Main Content View
 struct ContentView: View {
-    @StateObject private var viewModel = IdentityViewModel()
-    @State private var showCopied = false
+    @StateObject private var viewModel = AppViewModel()
+    @State private var selectedTab = 0
     
     var body: some View {
         ZStack {
-            // Background gradient
+            // Background
             LinearGradient(
                 colors: [.bgPrimary, Color(red: 0.08, green: 0.08, blue: 0.15)],
                 startPoint: .top,
@@ -52,18 +121,44 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
             
-            // Ambient glow effect
+            TabView(selection: $selectedTab) {
+                IdentityTab(viewModel: viewModel)
+                    .tabItem {
+                        Image(systemName: "key.fill")
+                        Text("Identity")
+                    }
+                    .tag(0)
+                
+                NetworkTab(viewModel: viewModel)
+                    .tabItem {
+                        Image(systemName: "network")
+                        Text("Network")
+                    }
+                    .tag(1)
+            }
+            .accentColor(.accentEnd)
+        }
+    }
+}
+
+// MARK: - Identity Tab
+struct IdentityTab: View {
+    @ObservedObject var viewModel: AppViewModel
+    @State private var showCopied = false
+    
+    var body: some View {
+        ZStack {
+            // Ambient glow
             Circle()
                 .fill(LinearGradient.accent)
                 .blur(radius: 100)
                 .opacity(0.3)
                 .offset(y: -200)
-                .ignoresSafeArea()
             
             VStack(spacing: 32) {
                 Spacer()
                 
-                // App icon/logo
+                // App icon
                 ZStack {
                     Circle()
                         .fill(LinearGradient.accent)
@@ -75,7 +170,6 @@ struct ContentView: View {
                         .font(.system(size: 48, weight: .medium))
                         .foregroundStyle(LinearGradient.accent)
                 }
-                .padding(.bottom, 8)
                 
                 // Title
                 VStack(spacing: 8) {
@@ -97,10 +191,7 @@ struct ContentView: View {
                         publicKeyHex: identity.publicKeyHex,
                         showCopied: $showCopied
                     )
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: 0.9).combined(with: .opacity),
-                        removal: .opacity
-                    ))
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
                 }
                 
                 Spacer()
@@ -110,9 +201,7 @@ struct ContentView: View {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                         viewModel.generateNewIdentity()
                     }
-                    // Haptic feedback
-                    let generator = UIImpactFeedbackGenerator(style: .medium)
-                    generator.impactOccurred()
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }) {
                     HStack(spacing: 12) {
                         if viewModel.isGenerating {
@@ -121,17 +210,13 @@ struct ContentView: View {
                         } else {
                             Image(systemName: viewModel.identity == nil ? "key.fill" : "arrow.triangle.2.circlepath")
                         }
-                        
                         Text(viewModel.identity == nil ? "Generate Identity" : "Regenerate")
                             .fontWeight(.semibold)
                     }
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 18)
-                    .background(
-                        LinearGradient.accent
-                            .opacity(viewModel.isGenerating ? 0.7 : 1.0)
-                    )
+                    .background(LinearGradient.accent.opacity(viewModel.isGenerating ? 0.7 : 1.0))
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .shadow(color: .accentStart.opacity(0.5), radius: 20, y: 10)
                 }
@@ -141,10 +226,9 @@ struct ContentView: View {
             }
         }
         .overlay(
-            // Copied toast
             VStack {
                 if showCopied {
-                    Text("✓ Copied to clipboard")
+                    Text("Copied to clipboard")
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 20)
@@ -154,9 +238,7 @@ struct ContentView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .onAppear {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                withAnimation {
-                                    showCopied = false
-                                }
+                                withAnimation { showCopied = false }
                             }
                         }
                 }
@@ -164,6 +246,184 @@ struct ContentView: View {
             }
             .padding(.top, 60)
         )
+    }
+}
+
+// MARK: - Network Tab
+struct NetworkTab: View {
+    @ObservedObject var viewModel: AppViewModel
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            // Header
+            VStack(spacing: 8) {
+                Image(systemName: "network")
+                    .font(.system(size: 40))
+                    .foregroundStyle(LinearGradient.accent)
+                
+                Text("P2P Network")
+                    .font(.title2.bold())
+                    .foregroundColor(.white)
+            }
+            .padding(.top, 40)
+            
+            // Status card
+            VStack(spacing: 16) {
+                HStack {
+                    Circle()
+                        .fill(viewModel.isNetworkRunning ? Color.green : Color.gray)
+                        .frame(width: 12, height: 12)
+                    Text(viewModel.isNetworkRunning ? "Running" : "Stopped")
+                        .foregroundColor(.white)
+                    Spacer()
+                }
+                
+                if !viewModel.peerId.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Peer ID")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.5))
+                        Text(String(viewModel.peerId.prefix(20)) + "...")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                
+                if !viewModel.listeningAddress.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Listening On")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.5))
+                        Text(viewModel.listeningAddress)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.accentEnd)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+            )
+            .padding(.horizontal, 24)
+            
+            // Start/Stop button
+            Button(action: {
+                if viewModel.isNetworkRunning {
+                    viewModel.stopNetwork()
+                } else {
+                    viewModel.startNetwork()
+                }
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }) {
+                HStack {
+                    Image(systemName: viewModel.isNetworkRunning ? "stop.fill" : "play.fill")
+                    Text(viewModel.isNetworkRunning ? "Stop Network" : "Start Network")
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    Group {
+                        if viewModel.isNetworkRunning {
+                            Color.red.opacity(0.8)
+                        } else {
+                            LinearGradient.accent
+                        }
+                    }
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(.horizontal, 24)
+            
+            // Discovered peers
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Discovered Peers")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Spacer()
+                    Text("\(viewModel.discoveredPeers.count)")
+                        .font(.caption)
+                        .foregroundColor(.accentEnd)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.accentEnd.opacity(0.2))
+                        .clipShape(Capsule())
+                }
+                
+                if viewModel.discoveredPeers.isEmpty {
+                    VStack(spacing: 8) {
+                        if viewModel.isNetworkRunning {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.5)))
+                            Text("Searching...")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.5))
+                        } else {
+                            Text("Start the network to discover peers")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(viewModel.discoveredPeers, id: \.peerId) { peer in
+                                PeerRow(peer: peer)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+            )
+            .padding(.horizontal, 24)
+            
+            Spacer()
+        }
+    }
+}
+
+// MARK: - Peer Row
+struct PeerRow: View {
+    let peer: PeerInfo
+    
+    var body: some View {
+        HStack {
+            Image(systemName: "person.circle.fill")
+                .foregroundStyle(LinearGradient.accent)
+                .font(.title2)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(peer.peerId.prefix(16)) + "...")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.white)
+                
+                if let addr = peer.addresses.first {
+                    Text(addr)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+            
+            Spacer()
+            
+            Circle()
+                .fill(Color.green)
+                .frame(width: 8, height: 8)
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -175,7 +435,6 @@ struct IdentityCard: View {
     
     var body: some View {
         VStack(spacing: 20) {
-            // Fingerprint section
             VStack(spacing: 8) {
                 Text("Your Identity Fingerprint")
                     .font(.caption)
@@ -189,7 +448,6 @@ struct IdentityCard: View {
             Divider()
                 .background(Color.white.opacity(0.1))
             
-            // Public key section
             VStack(spacing: 8) {
                 Text("Public Key")
                     .font(.caption)
@@ -202,14 +460,12 @@ struct IdentityCard: View {
                     .multilineTextAlignment(.center)
             }
             
-            // Copy button
             Button(action: {
                 UIPasteboard.general.string = publicKeyHex
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     showCopied = true
                 }
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.success)
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
             }) {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.on.doc")
@@ -243,7 +499,6 @@ struct IdentityCard: View {
     }
 }
 
-// MARK: - Preview
 #Preview {
     ContentView()
 }
