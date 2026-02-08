@@ -63,6 +63,22 @@ typedef struct RustCallStatus {
 typedef void (*UniFfiRustFutureContinuation)(void * _Nonnull, int8_t);
 
 // Scaffolding functions
+void uniffi_securechat_core_fn_free_messagingapi(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+void uniffi_securechat_core_fn_method_messagingapi_add_contact(void*_Nonnull ptr, RustBuffer peer_id, RustBuffer name, RustBuffer identity_key, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_securechat_core_fn_method_messagingapi_get_prekey_bundle(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+void uniffi_securechat_core_fn_method_messagingapi_handle_incoming(void*_Nonnull ptr, RustBuffer from_peer_id, RustBuffer data, RustCallStatus *_Nonnull out_status
+);
+void uniffi_securechat_core_fn_method_messagingapi_initiate_session(void*_Nonnull ptr, RustBuffer peer_id, RustBuffer bundle_json, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_securechat_core_fn_method_messagingapi_next_event(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_securechat_core_fn_method_messagingapi_next_outgoing(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_securechat_core_fn_method_messagingapi_send_message(void*_Nonnull ptr, RustBuffer peer_id, RustBuffer text, RustCallStatus *_Nonnull out_status
+);
 void uniffi_securechat_core_fn_free_networkmanager(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 RustBuffer uniffi_securechat_core_fn_method_networkmanager_get_peer_id(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -73,9 +89,13 @@ int8_t uniffi_securechat_core_fn_method_networkmanager_is_running(void*_Nonnull 
 );
 RustBuffer uniffi_securechat_core_fn_method_networkmanager_poll_event(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
+void uniffi_securechat_core_fn_method_networkmanager_send_message(void*_Nonnull ptr, RustBuffer peer_id, RustBuffer data, RustCallStatus *_Nonnull out_status
+);
 void uniffi_securechat_core_fn_method_networkmanager_start(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 void uniffi_securechat_core_fn_method_networkmanager_stop(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+void*_Nonnull uniffi_securechat_core_fn_func_create_messaging_manager(RustBuffer peer_id, RustCallStatus *_Nonnull out_status
 );
 void*_Nonnull uniffi_securechat_core_fn_func_create_network_manager(RustCallStatus *_Nonnull out_status
     
@@ -203,6 +223,9 @@ void ffi_securechat_core_rust_future_free_void(void* _Nonnull handle
 );
 void ffi_securechat_core_rust_future_complete_void(void* _Nonnull handle, RustCallStatus *_Nonnull out_status
 );
+uint16_t uniffi_securechat_core_checksum_func_create_messaging_manager(void
+    
+);
 uint16_t uniffi_securechat_core_checksum_func_create_network_manager(void
     
 );
@@ -218,6 +241,27 @@ uint16_t uniffi_securechat_core_checksum_func_get_public_key_hex(void
 uint16_t uniffi_securechat_core_checksum_func_perform_key_exchange(void
     
 );
+uint16_t uniffi_securechat_core_checksum_method_messagingapi_add_contact(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_messagingapi_get_prekey_bundle(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_messagingapi_handle_incoming(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_messagingapi_initiate_session(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_messagingapi_next_event(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_messagingapi_next_outgoing(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_messagingapi_send_message(void
+    
+);
 uint16_t uniffi_securechat_core_checksum_method_networkmanager_get_peer_id(void
     
 );
@@ -228,6 +272,9 @@ uint16_t uniffi_securechat_core_checksum_method_networkmanager_is_running(void
     
 );
 uint16_t uniffi_securechat_core_checksum_method_networkmanager_poll_event(void
+    
+);
+uint16_t uniffi_securechat_core_checksum_method_networkmanager_send_message(void
     
 );
 uint16_t uniffi_securechat_core_checksum_method_networkmanager_start(void

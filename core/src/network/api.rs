@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+
+
 /// Network errors exposed to FFI
 #[derive(Debug, thiserror::Error)]
 pub enum NetworkError {
@@ -15,10 +17,12 @@ pub enum NetworkError {
     AlreadyRunning,
     #[error("Node is not running")]
     NotRunning,
-    #[error("Failed to start node: {0}")]
-    StartFailed(String),
-    #[error("Connection failed: {0}")]
-    ConnectionFailed(String),
+    #[error("Node start failed")]
+    StartFailed,
+    #[error("Connection failed")]
+    ConnectionFailed,
+    #[error("Generic error")]
+    GenericError,
 }
 
 /// Peer information exposed to FFI
@@ -43,6 +47,7 @@ pub enum NetworkEvent {
     Listening { address: String },
     PeerDiscovered { peer: PeerInfo },
     PeerDisconnected { peer_id: String },
+    MessageReceived { peer_id: String, data: Vec<u8> },
     Error { message: String },
 }
 
@@ -54,8 +59,18 @@ impl From<NodeEvent> for NetworkEvent {
                 peer: peer.into() 
             },
             NodeEvent::PeerDisconnected { peer_id } => NetworkEvent::PeerDisconnected { peer_id },
-            NodeEvent::Error { message } => NetworkEvent::Error { message },
+            NodeEvent::MessageReceived { peer_id, envelope } => {
+                let data = envelope.to_bytes();
+                NetworkEvent::MessageReceived { peer_id, data }
+            },
+            NodeEvent::Error { message } => NetworkEvent::Error { message }, // Kept original as requested change was type-incorrect
         }
+    }
+}
+
+impl From<String> for NetworkError {
+    fn from(_s: String) -> Self {
+        NetworkError::GenericError
     }
 }
 
@@ -107,7 +122,7 @@ impl NetworkManager {
         
         self.runtime.block_on(async {
             node.start(config).await
-        }).map_err(|e| NetworkError::StartFailed(e))?;
+        }).map_err(|_| NetworkError::StartFailed)?;
 
         *running = true;
         Ok(())
@@ -152,6 +167,19 @@ impl NetworkManager {
                 node.next_event()
             ).await.ok().flatten().map(|e| e.into())
         })
+    }
+
+    /// Send a message to a peer
+    pub fn send_message(&self, peer_id: String, data: Vec<u8>) -> Result<(), NetworkError> {
+        // Deserialize envelope
+        let envelope = crate::messaging::MessageEnvelope::from_bytes(&data)
+            .map_err(|_| NetworkError::GenericError)?;
+            
+        let mut node = self.node.lock().unwrap();
+        
+        self.runtime.block_on(async {
+            node.send_message(peer_id, envelope).await
+        }).map_err(|_| NetworkError::ConnectionFailed)
     }
 }
 

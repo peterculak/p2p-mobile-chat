@@ -35,6 +35,16 @@ Build a truly private messenger where:
 - Local mDNS discovery for LAN messaging
 - NAT traversal for direct connections
 
+## Security Warning
+
+<div style="background-color: #ffcccc; color: #cc0000; padding: 10px; border-radius: 5px; font-weight: bold;">
+⚠️ SECURITY WARNING: DEVELOPMENT MODE ⚠️
+
+The core `messaging::manager` currently allows UNENCRYPTED messages as a fallback for testing against `p2p-test` peers.
+This allows plain-text messages on the network if no crypto session exists. 
+**This behavior MUST be disabled via compilation flags before any production release.**
+</div>
+
 ## Technology Stack
 
 | Component | Technology |
@@ -53,7 +63,7 @@ Build a truly private messenger where:
 | 1. Foundation | Complete | Rust core, UniFFI, iOS app |
 | 2. P2P Networking | Complete | libp2p, mDNS, Kademlia DHT |
 | 3. Encryption | Complete | Signal Protocol (X3DH, Double Ratchet) |
-| 4. Messaging | Pending | Send/receive, offline storage |
+| 4. Messaging | Complete | Bidirectional (iOS/CLI), offline storage, fallback |
 | 5. Privacy | Pending | Onion routing |
 | 6. Polish | Pending | UI, Android, testing |
 

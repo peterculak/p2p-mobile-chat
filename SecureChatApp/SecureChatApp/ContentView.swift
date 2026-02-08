@@ -31,6 +31,9 @@ class AppViewModel: ObservableObject {
     @Published var listeningAddress: String = ""
     @Published var peerId: String = ""
     
+    // Callbacks
+    var onMessageReceived: ((String, Data) -> Void)?
+    
     private var pollTimer: Timer?
     
     func generateNewIdentity() {
@@ -102,6 +105,8 @@ class AppViewModel: ObservableObject {
             discoveredPeers.removeAll { $0.peerId == peerId }
         case .error(let message):
             print("Network error: \(message)")
+        case .messageReceived(let peerId, let data):
+            onMessageReceived?(peerId, Data(data))
         }
     }
 }
@@ -109,6 +114,7 @@ class AppViewModel: ObservableObject {
 // MARK: - Main Content View
 struct ContentView: View {
     @StateObject private var viewModel = AppViewModel()
+    @StateObject private var chatViewModel = ChatViewModel()
     @State private var selectedTab = 0
     
     var body: some View {
@@ -135,8 +141,23 @@ struct ContentView: View {
                         Text("Network")
                     }
                     .tag(1)
+                
+                ChatView(viewModel: chatViewModel)
+                    .tabItem {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                        Text("Chats")
+                    }
+                    .tag(2)
             }
             .accentColor(.accentEnd)
+        }
+        .onAppear {
+            chatViewModel.bind(to: viewModel)
+            viewModel.onMessageReceived = { peerId, data in
+                chatViewModel.ingestNetworkMessage(peerId: peerId, data: data)
+            }
+            // Auto-start network on launch
+            viewModel.startNetwork()
         }
     }
 }

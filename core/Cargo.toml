@@ -9,8 +9,8 @@ name = "securechat_core"
 
 [dependencies]
 # Cryptography - Signal Protocol
-ed25519-dalek = { version = "2.1", features = ["rand_core"] }
-x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core", "serde"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets", "serde"] }
 curve25519-dalek = "4.1"
 aes-gcm = "0.10"
 hkdf = "0.12"
@@ -25,7 +25,7 @@ zeroize = { version = "1.7", features = ["derive"] }
 uniffi = { version = "0.25", features = ["cli"] }
 
 # Async runtime
-tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util"] }
 
 # P2P Networking
 libp2p = { version = "0.53", features = [
@@ -41,6 +41,7 @@ libp2p = { version = "0.53", features = [
     "ping",
     "relay",
     "dcutr",
+    "request-response",
     "macros",
 ] }
 

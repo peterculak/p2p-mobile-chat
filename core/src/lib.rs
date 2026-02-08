@@ -1,7 +1,7 @@
 //! SecureChat Core Library
 //! 
 //! Provides cryptographic identity generation, key exchange,
-//! Signal Protocol encryption, and P2P networking.
+//! Signal Protocol encryption, P2P networking, and messaging.
 
 use ed25519_dalek::SigningKey;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -11,6 +11,8 @@ use sha2::{Sha256, Digest};
 // Modules
 pub mod network;
 pub mod crypto;
+pub mod messaging;
+pub mod api;
 
 // Re-export network API types for UniFFI
 pub use network::{NetworkManager, NetworkError, create_network_manager};
@@ -19,6 +21,14 @@ pub use network::api::{NetworkEvent, PeerInfo};
 // Re-export crypto types
 pub use crypto::{IdentityKeyPair, PreKeyBundle, SignedPreKey, OneTimePreKey};
 pub use crypto::{Session, SessionError, EncryptedMessage};
+
+// Re-export messaging types
+pub use messaging::{Message, MessageType, MessageEnvelope};
+pub use messaging::{MessagingManager, MessagingError, MessagingEvent};
+pub use messaging::{Contact, ContactStore};
+
+// Re-export API types
+pub use api::messaging::{MessagingAPI, OutgoingMessage, MessagingAPIEvent, create_messaging_manager};
 
 // Include UniFFI scaffolding
 uniffi::include_scaffolding!("securechat_core");

@@ -9,6 +9,7 @@ mod node;
 mod behaviour;
 mod config;
 pub mod api;
+pub mod chat;
 
 pub use node::{P2PNode, NodeEvent, PeerInfo};
 pub use config::NetworkConfig;

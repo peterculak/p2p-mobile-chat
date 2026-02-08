@@ -297,6 +297,19 @@ private func uniffiCheckCallStatus(
 // Public interface members begin here.
 
 
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -357,11 +370,160 @@ fileprivate struct FfiConverterString: FfiConverter {
 }
 
 
+public protocol MessagingAPIProtocol {
+    func addContact(peerId: String, name: String, identityKey: [UInt8])  
+    func getPrekeyBundle()   -> String
+    func handleIncoming(fromPeerId: String, data: [UInt8])  throws
+    func initiateSession(peerId: String, bundleJson: String)  throws
+    func nextEvent()   -> MessagingApiEvent?
+    func nextOutgoing()   -> OutgoingMessage?
+    func sendMessage(peerId: String, text: String)  throws -> String
+    
+}
+
+public class MessagingApi: MessagingAPIProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    deinit {
+        try! rustCall { uniffi_securechat_core_fn_free_messagingapi(pointer, $0) }
+    }
+
+    
+
+    
+    
+
+    public func addContact(peerId: String, name: String, identityKey: [UInt8])  {
+        try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_messagingapi_add_contact(self.pointer, 
+        FfiConverterString.lower(peerId),
+        FfiConverterString.lower(name),
+        FfiConverterSequenceUInt8.lower(identityKey),$0
+    )
+}
+    }
+
+    public func getPrekeyBundle()  -> String {
+        return try!  FfiConverterString.lift(
+            try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_messagingapi_get_prekey_bundle(self.pointer, $0
+    )
+}
+        )
+    }
+
+    public func handleIncoming(fromPeerId: String, data: [UInt8]) throws {
+        try 
+    rustCallWithError(FfiConverterTypeNetworkError.lift) {
+    uniffi_securechat_core_fn_method_messagingapi_handle_incoming(self.pointer, 
+        FfiConverterString.lower(fromPeerId),
+        FfiConverterSequenceUInt8.lower(data),$0
+    )
+}
+    }
+
+    public func initiateSession(peerId: String, bundleJson: String) throws {
+        try 
+    rustCallWithError(FfiConverterTypeNetworkError.lift) {
+    uniffi_securechat_core_fn_method_messagingapi_initiate_session(self.pointer, 
+        FfiConverterString.lower(peerId),
+        FfiConverterString.lower(bundleJson),$0
+    )
+}
+    }
+
+    public func nextEvent()  -> MessagingApiEvent? {
+        return try!  FfiConverterOptionTypeMessagingAPIEvent.lift(
+            try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_messagingapi_next_event(self.pointer, $0
+    )
+}
+        )
+    }
+
+    public func nextOutgoing()  -> OutgoingMessage? {
+        return try!  FfiConverterOptionTypeOutgoingMessage.lift(
+            try! 
+    rustCall() {
+    
+    uniffi_securechat_core_fn_method_messagingapi_next_outgoing(self.pointer, $0
+    )
+}
+        )
+    }
+
+    public func sendMessage(peerId: String, text: String) throws -> String {
+        return try  FfiConverterString.lift(
+            try 
+    rustCallWithError(FfiConverterTypeNetworkError.lift) {
+    uniffi_securechat_core_fn_method_messagingapi_send_message(self.pointer, 
+        FfiConverterString.lower(peerId),
+        FfiConverterString.lower(text),$0
+    )
+}
+        )
+    }
+}
+
+public struct FfiConverterTypeMessagingAPI: FfiConverter {
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = MessagingApi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MessagingApi {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: MessagingApi, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> MessagingApi {
+        return MessagingApi(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: MessagingApi) -> UnsafeMutableRawPointer {
+        return value.pointer
+    }
+}
+
+
+public func FfiConverterTypeMessagingAPI_lift(_ pointer: UnsafeMutableRawPointer) throws -> MessagingApi {
+    return try FfiConverterTypeMessagingAPI.lift(pointer)
+}
+
+public func FfiConverterTypeMessagingAPI_lower(_ value: MessagingApi) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeMessagingAPI.lower(value)
+}
+
+
 public protocol NetworkManagerProtocol {
     func getPeerId()   -> String
     func getPeers()   -> [PeerInfo]
     func isRunning()   -> Bool
     func pollEvent()   -> NetworkEvent?
+    func sendMessage(peerId: String, data: [UInt8])  throws
     func start()  throws
     func stop()  
     
@@ -428,6 +590,16 @@ public class NetworkManager: NetworkManagerProtocol {
     )
 }
         )
+    }
+
+    public func sendMessage(peerId: String, data: [UInt8]) throws {
+        try 
+    rustCallWithError(FfiConverterTypeNetworkError.lift) {
+    uniffi_securechat_core_fn_method_networkmanager_send_message(self.pointer, 
+        FfiConverterString.lower(peerId),
+        FfiConverterSequenceUInt8.lower(data),$0
+    )
+}
     }
 
     public func start() throws {
@@ -543,6 +715,61 @@ public func FfiConverterTypeIdentity_lower(_ value: Identity) -> RustBuffer {
 }
 
 
+public struct OutgoingMessage {
+    public var peerId: String
+    public var data: [UInt8]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(peerId: String, data: [UInt8]) {
+        self.peerId = peerId
+        self.data = data
+    }
+}
+
+
+extension OutgoingMessage: Equatable, Hashable {
+    public static func ==(lhs: OutgoingMessage, rhs: OutgoingMessage) -> Bool {
+        if lhs.peerId != rhs.peerId {
+            return false
+        }
+        if lhs.data != rhs.data {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(peerId)
+        hasher.combine(data)
+    }
+}
+
+
+public struct FfiConverterTypeOutgoingMessage: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingMessage {
+        return try OutgoingMessage(
+            peerId: FfiConverterString.read(from: &buf), 
+            data: FfiConverterSequenceUInt8.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OutgoingMessage, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.peerId, into: &buf)
+        FfiConverterSequenceUInt8.write(value.data, into: &buf)
+    }
+}
+
+
+public func FfiConverterTypeOutgoingMessage_lift(_ buf: RustBuffer) throws -> OutgoingMessage {
+    return try FfiConverterTypeOutgoingMessage.lift(buf)
+}
+
+public func FfiConverterTypeOutgoingMessage_lower(_ value: OutgoingMessage) -> RustBuffer {
+    return FfiConverterTypeOutgoingMessage.lower(value)
+}
+
+
 public struct PeerInfo {
     public var peerId: String
     public var addresses: [String]
@@ -644,6 +871,102 @@ public func FfiConverterTypeSharedSecret_lower(_ value: SharedSecret) -> RustBuf
     return FfiConverterTypeSharedSecret.lower(value)
 }
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+public enum MessagingApiEvent {
+    
+    case messageReceived(fromPeerId: String, text: String, id: String)
+    case messageSent(toPeerId: String, messageId: String)
+    case sessionEstablished(peerId: String)
+    case deliveryReceipt(peerId: String, messageId: String)
+    case error(message: String)
+}
+
+public struct FfiConverterTypeMessagingAPIEvent: FfiConverterRustBuffer {
+    typealias SwiftType = MessagingApiEvent
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MessagingApiEvent {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .messageReceived(
+            fromPeerId: try FfiConverterString.read(from: &buf), 
+            text: try FfiConverterString.read(from: &buf), 
+            id: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .messageSent(
+            toPeerId: try FfiConverterString.read(from: &buf), 
+            messageId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .sessionEstablished(
+            peerId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .deliveryReceipt(
+            peerId: try FfiConverterString.read(from: &buf), 
+            messageId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 5: return .error(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: MessagingApiEvent, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .messageReceived(fromPeerId,text,id):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(fromPeerId, into: &buf)
+            FfiConverterString.write(text, into: &buf)
+            FfiConverterString.write(id, into: &buf)
+            
+        
+        case let .messageSent(toPeerId,messageId):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(toPeerId, into: &buf)
+            FfiConverterString.write(messageId, into: &buf)
+            
+        
+        case let .sessionEstablished(peerId):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(peerId, into: &buf)
+            
+        
+        case let .deliveryReceipt(peerId,messageId):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(peerId, into: &buf)
+            FfiConverterString.write(messageId, into: &buf)
+            
+        
+        case let .error(message):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+public func FfiConverterTypeMessagingAPIEvent_lift(_ buf: RustBuffer) throws -> MessagingApiEvent {
+    return try FfiConverterTypeMessagingAPIEvent.lift(buf)
+}
+
+public func FfiConverterTypeMessagingAPIEvent_lower(_ value: MessagingApiEvent) -> RustBuffer {
+    return FfiConverterTypeMessagingAPIEvent.lower(value)
+}
+
+
+extension MessagingApiEvent: Equatable, Hashable {}
+
+
+
 public enum NetworkError {
 
     
@@ -659,6 +982,9 @@ public enum NetworkError {
     
     // Simple error enums only carry a message
     case ConnectionFailed(message: String)
+    
+    // Simple error enums only carry a message
+    case GenericError(message: String)
     
 
     fileprivate static func uniffiErrorHandler(_ error: RustBuffer) throws -> Error {
@@ -693,6 +1019,10 @@ public struct FfiConverterTypeNetworkError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
         
+        case 5: return .GenericError(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -712,6 +1042,8 @@ public struct FfiConverterTypeNetworkError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(3))
         case .ConnectionFailed(_ /* message is ignored*/):
             writeInt(&buf, Int32(4))
+        case .GenericError(_ /* message is ignored*/):
+            writeInt(&buf, Int32(5))
 
         
         }
@@ -730,6 +1062,7 @@ public enum NetworkEvent {
     case listening(address: String)
     case peerDiscovered(peer: PeerInfo)
     case peerDisconnected(peerId: String)
+    case messageReceived(peerId: String, data: [UInt8])
     case error(message: String)
 }
 
@@ -752,7 +1085,12 @@ public struct FfiConverterTypeNetworkEvent: FfiConverterRustBuffer {
             peerId: try FfiConverterString.read(from: &buf)
         )
         
-        case 4: return .error(
+        case 4: return .messageReceived(
+            peerId: try FfiConverterString.read(from: &buf), 
+            data: try FfiConverterSequenceUInt8.read(from: &buf)
+        )
+        
+        case 5: return .error(
             message: try FfiConverterString.read(from: &buf)
         )
         
@@ -779,8 +1117,14 @@ public struct FfiConverterTypeNetworkEvent: FfiConverterRustBuffer {
             FfiConverterString.write(peerId, into: &buf)
             
         
-        case let .error(message):
+        case let .messageReceived(peerId,data):
             writeInt(&buf, Int32(4))
+            FfiConverterString.write(peerId, into: &buf)
+            FfiConverterSequenceUInt8.write(data, into: &buf)
+            
+        
+        case let .error(message):
+            writeInt(&buf, Int32(5))
             FfiConverterString.write(message, into: &buf)
             
         }
@@ -801,6 +1145,48 @@ extension NetworkEvent: Equatable, Hashable {}
 
 
 
+fileprivate struct FfiConverterOptionTypeOutgoingMessage: FfiConverterRustBuffer {
+    typealias SwiftType = OutgoingMessage?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeOutgoingMessage.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeOutgoingMessage.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+fileprivate struct FfiConverterOptionTypeMessagingAPIEvent: FfiConverterRustBuffer {
+    typealias SwiftType = MessagingApiEvent?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeMessagingAPIEvent.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeMessagingAPIEvent.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
 fileprivate struct FfiConverterOptionTypeNetworkEvent: FfiConverterRustBuffer {
     typealias SwiftType = NetworkEvent?
 
@@ -819,6 +1205,28 @@ fileprivate struct FfiConverterOptionTypeNetworkEvent: FfiConverterRustBuffer {
         case 1: return try FfiConverterTypeNetworkEvent.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
+    }
+}
+
+fileprivate struct FfiConverterSequenceUInt8: FfiConverterRustBuffer {
+    typealias SwiftType = [UInt8]
+
+    public static func write(_ value: [UInt8], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterUInt8.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt8] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UInt8]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterUInt8.read(from: &buf))
+        }
+        return seq
     }
 }
 
@@ -864,6 +1272,15 @@ fileprivate struct FfiConverterSequenceTypePeerInfo: FfiConverterRustBuffer {
         }
         return seq
     }
+}
+
+public func createMessagingManager(peerId: String)  -> MessagingApi {
+    return try!  FfiConverterTypeMessagingAPI.lift(
+        try! rustCall() {
+    uniffi_securechat_core_fn_func_create_messaging_manager(
+        FfiConverterString.lower(peerId),$0)
+}
+    )
 }
 
 public func createNetworkManager()  -> NetworkManager {
@@ -925,6 +1342,9 @@ private var initializationResult: InitializationResult {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_securechat_core_checksum_func_create_messaging_manager() != 48569) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_securechat_core_checksum_func_create_network_manager() != 44264) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -940,6 +1360,27 @@ private var initializationResult: InitializationResult {
     if (uniffi_securechat_core_checksum_func_perform_key_exchange() != 16349) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_securechat_core_checksum_method_messagingapi_add_contact() != 49372) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_messagingapi_get_prekey_bundle() != 59216) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_messagingapi_handle_incoming() != 3113) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_messagingapi_initiate_session() != 59909) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_messagingapi_next_event() != 51764) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_messagingapi_next_outgoing() != 59346) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_messagingapi_send_message() != 33757) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_securechat_core_checksum_method_networkmanager_get_peer_id() != 41202) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -950,6 +1391,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_securechat_core_checksum_method_networkmanager_poll_event() != 45112) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_securechat_core_checksum_method_networkmanager_send_message() != 10887) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_securechat_core_checksum_method_networkmanager_start() != 10550) {

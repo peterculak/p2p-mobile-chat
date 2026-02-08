@@ -2,11 +2,14 @@
 
 use crate::network::behaviour::{NodeBehaviour, BehaviourEvent};
 use crate::network::config::NetworkConfig;
+use crate::messaging::MessageEnvelope;
+use crate::network::chat::{ChatRequest, ChatResponse};
 
 use libp2p::{
     core::transport::upgrade::Version,
     identity,
     noise,
+    request_response::{self, ResponseChannel, OutboundRequestId},
     swarm::{SwarmEvent, Swarm},
     tcp, yamux, Multiaddr, PeerId, Transport,
 };
@@ -33,6 +36,8 @@ pub enum NodeEvent {
     PeerDisconnected { peer_id: String },
     /// Error occurred
     Error { message: String },
+    /// Message received from peer
+    MessageReceived { peer_id: String, envelope: MessageEnvelope },
 }
 
 /// Commands that can be sent to the node
@@ -43,12 +48,16 @@ enum NodeCommand {
     GetPeers(oneshot::Sender<Vec<PeerInfo>>),
     /// Dial a peer
     Dial(String),
+    /// Send a message to a peer
+    SendMessage { peer_id: String, envelope: MessageEnvelope },
 }
 
 /// A P2P network node
 pub struct P2PNode {
     /// Our peer ID
     local_peer_id: PeerId,
+    /// Local keypair
+    local_key: identity::Keypair,
     /// Local peer ID as hex string
     peer_id_string: String,
     /// Command sender for controlling the node
@@ -70,11 +79,23 @@ impl P2PNode {
 
         Self {
             local_peer_id,
+            local_key,
             peer_id_string: local_peer_id.to_string(),
             command_tx: None,
             event_rx: None,
             connected_peers: Arc::new(RwLock::new(HashSet::new())),
             is_running: Arc::new(RwLock::new(false)),
+        }
+    }
+    
+    /// Get the public key as hex string (32 bytes Ed25519)
+    pub fn public_key_hex(&self) -> String {
+        let pub_key = self.local_key.public();
+        if let Ok(ed25519_key) = pub_key.try_into_ed25519() {
+             hex::encode(ed25519_key.to_bytes())
+        } else {
+             // Fallback or error, but we forced Ed25519 above
+             String::new()
         }
     }
 
@@ -91,18 +112,15 @@ impl P2PNode {
     /// Start the P2P node
     pub async fn start(&mut self, config: NetworkConfig) -> Result<(), String> {
         if *self.is_running.read().await {
-            return Err("Node is already running".to_string());
+            return Err("Node already running".to_string());
         }
 
-        // Generate identity
-        let local_key = identity::Keypair::generate_ed25519();
-        let local_peer_id = PeerId::from(local_key.public());
-        self.local_peer_id = local_peer_id;
-        self.peer_id_string = local_peer_id.to_string();
+        let local_key = self.local_key.clone();
+        let local_peer_id = self.local_peer_id;
 
         // Create transport
-        let transport = tcp::tokio::Transport::new(tcp::Config::default())
-            .upgrade(Version::V1Lazy)
+        let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
+            .upgrade(Version::V1)
             .authenticate(noise::Config::new(&local_key).map_err(|e| e.to_string())?)
             .multiplex(yamux::Config::default())
             .boxed();
@@ -190,6 +208,30 @@ impl P2PNode {
                                 info!("Disconnected from peer: {peer_id}");
                                 connected_peers.write().await.remove(&peer_id);
                             }
+
+                            SwarmEvent::Behaviour(BehaviourEvent::Chat(chat_event)) => {
+                                match chat_event {
+                                    request_response::Event::Message { peer, message } => {
+                                        match message {
+                                            request_response::Message::Request { request, channel, .. } => {
+                                                debug!("Received chat request from {peer}");
+                                                // Send immediate Ack
+                                                swarm.behaviour_mut().chat.send_response(channel, ChatResponse(vec![])).ok();
+                                                
+                                                // Emit event
+                                                let _ = event_tx.send(NodeEvent::MessageReceived {
+                                                    peer_id: peer.to_string(),
+                                                    envelope: request.0,
+                                                }).await;
+                                            }
+                                            request_response::Message::Response { .. } => {
+                                                debug!("Received chat response (Ack) from {peer}");
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -210,6 +252,13 @@ impl P2PNode {
                                     .collect();
                                 let _ = reply.send(peers);
                             }
+                            Some(NodeCommand::SendMessage { peer_id, envelope }) => {
+                                if let Ok(peer) = peer_id.parse::<PeerId>() {
+                                    swarm.behaviour_mut().chat.send_request(&peer, ChatRequest(envelope));
+                                } else {
+                                    warn!("Invalid peer ID for messaging: {peer_id}");
+                                }
+                            }
                             Some(NodeCommand::Dial(addr)) => {
                                 if let Ok(multiaddr) = addr.parse::<Multiaddr>() {
                                     if let Err(e) = swarm.dial(multiaddr) {
@@ -226,6 +275,26 @@ impl P2PNode {
         });
 
         info!("P2P node started with peer ID: {}", self.peer_id_string);
+        Ok(())
+    }
+
+    /// Dial a peer
+    pub async fn dial(&mut self, address: &str) -> Result<(), String> {
+        if let Some(tx) = &self.command_tx {
+            tx.send(NodeCommand::Dial(address.to_string()))
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Send a message to a peer
+    pub async fn send_message(&mut self, peer_id: String, envelope: MessageEnvelope) -> Result<(), String> {
+        if let Some(tx) = &self.command_tx {
+            tx.send(NodeCommand::SendMessage { peer_id, envelope })
+                .await
+                .map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 

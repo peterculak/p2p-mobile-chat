@@ -10,6 +10,9 @@ namespace securechat_core {
     
     // P2P Network Manager (singleton for iOS)
     NetworkManager create_network_manager();
+
+    // Create a new messaging manager
+    MessagingAPI create_messaging_manager(string peer_id);
 };
 
 // A user's cryptographic identity
@@ -35,6 +38,7 @@ interface NetworkEvent {
     Listening(string address);
     PeerDiscovered(PeerInfo peer);
     PeerDisconnected(string peer_id);
+    MessageReceived(string peer_id, sequence<u8> data);
     Error(string message);
 };
 
@@ -58,7 +62,54 @@ interface NetworkManager {
     
     // Poll for next event (non-blocking, returns null if no event)
     NetworkEvent? poll_event();
+    
+    // Send a message to a peer
+    [Throws=NetworkError]
+    void send_message(string peer_id, sequence<u8> data);
 };
+
+// Messaging API
+interface MessagingAPI {
+    // Add a contact
+    void add_contact(string peer_id, string name, sequence<u8> identity_key);
+    
+    // Get prekey bundle as JSON string
+    string get_prekey_bundle();
+    
+    // Initiate session with peer using their bundle (JSON)
+    [Throws=NetworkError]
+    void initiate_session(string peer_id, string bundle_json);
+    
+    // Send text message (returns message ID)
+    [Throws=NetworkError]
+    string send_message(string peer_id, string text);
+    
+    // Handle incoming data from network
+    [Throws=NetworkError]
+    void handle_incoming(string from_peer_id, sequence<u8> data);
+    
+    // Get next outgoing message (returns null if none)
+    OutgoingMessage? next_outgoing();
+    
+    // Get next event (returns null if none)
+    MessagingAPIEvent? next_event();
+};
+
+dictionary OutgoingMessage {
+    string peer_id;
+    sequence<u8> data;
+};
+
+[Enum]
+interface MessagingAPIEvent {
+    MessageReceived(string from_peer_id, string text, string id);
+    MessageSent(string to_peer_id, string message_id);
+    SessionEstablished(string peer_id);
+    DeliveryReceipt(string peer_id, string message_id);
+    Error(string message);
+};
+
+
 
 // Network errors
 [Error]
@@ -67,4 +118,5 @@ enum NetworkError {
     "NotRunning",
     "StartFailed",
     "ConnectionFailed",
+    "GenericError",
 };

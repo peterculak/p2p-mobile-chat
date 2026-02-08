@@ -6,6 +6,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 use rand::rngs::OsRng;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+use serde::{Serialize, Deserialize};
 
 /// Identity key pair (Ed25519 for signing, X25519 for key exchange)
 #[derive(Clone)]
@@ -165,7 +166,7 @@ impl OneTimePreKey {
 }
 
 /// Bundle of public keys shared with peers
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PreKeyBundle {
     /// Identity public key (X25519)
     pub identity_key: X25519PublicKey,

@@ -5,6 +5,8 @@ use libp2p::{
     swarm::NetworkBehaviour,
     PeerId,
 };
+use libp2p::request_response::{self, ProtocolSupport};
+use crate::network::chat::{ChatBehaviour, ChatEvent, ChatCodec, ChatProtocol};
 use std::time::Duration;
 
 /// Combined network behaviour for our P2P node
@@ -22,6 +24,9 @@ pub struct NodeBehaviour {
     
     /// Ping for connection keepalive
     pub ping: ping::Behaviour,
+    
+    /// Chat protocol for messaging
+    pub chat: ChatBehaviour,
 }
 
 /// Events from our combined behaviour
@@ -31,6 +36,7 @@ pub enum BehaviourEvent {
     Mdns(mdns::Event),
     Identify(identify::Event),
     Ping(ping::Event),
+    Chat(ChatEvent),
 }
 
 impl From<kad::Event> for BehaviourEvent {
@@ -54,6 +60,12 @@ impl From<identify::Event> for BehaviourEvent {
 impl From<ping::Event> for BehaviourEvent {
     fn from(event: ping::Event) -> Self {
         BehaviourEvent::Ping(event)
+    }
+}
+
+impl From<ChatEvent> for BehaviourEvent {
+    fn from(event: ChatEvent) -> Self {
+        BehaviourEvent::Chat(event)
     }
 }
 
@@ -81,11 +93,18 @@ impl NodeBehaviour {
         // Ping for keepalive
         let ping = ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(15)));
 
+        // Chat protocol
+        let chat = request_response::Behaviour::new(
+            vec![(ChatProtocol(), ProtocolSupport::Full)],
+            request_response::Config::default(),
+        );
+
         Self {
             kad,
             mdns,
             identify,
             ping,
+            chat,
         }
     }
 }

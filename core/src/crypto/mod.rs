@@ -5,10 +5,10 @@
 //! - Double Ratchet for message encryption
 //! - Session management
 
-mod keys;
-mod x3dh;
-mod ratchet;
-mod session;
+pub mod keys;
+pub mod x3dh;
+pub mod ratchet;
+pub mod session;
 
 pub use keys::{IdentityKeyPair, PreKeyBundle, SignedPreKey, OneTimePreKey};
 pub use x3dh::{X3DHSession, X3DHError};
