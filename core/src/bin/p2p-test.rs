@@ -24,19 +24,21 @@ async fn main() {
     let mut line_buf = String::new();
 
     println!("Peer ID: {}", node.peer_id());
-    println!("Identity Key: {}", node.public_key_hex());
     
     // Get and display our prekey bundle
     let bundle = messaging.get_prekey_bundle();
-    println!("PreKey Bundle (for contacts to add you):");
-    println!("  Identity: {}", hex::encode(bundle.identity_key));
-    println!("  Signed PreKey: {}", hex::encode(bundle.signed_prekey));
-    println!("  Signature: {}", hex::encode(bundle.signed_prekey_signature.to_bytes()));
-    if let Some((id, otpk)) = bundle.one_time_prekey {
-        println!("  One-Time PreKey: {} (ID: {})", hex::encode(otpk.as_bytes()), id);
-    }
+    let peer_id = node.peer_id();
+    let identity = hex::encode(bundle.identity_key);
+    let verifying = hex::encode(bundle.identity_verifying_key.as_bytes());
+    let signed_prekey = hex::encode(bundle.signed_prekey);
+    let signature = hex::encode(bundle.signed_prekey_signature.to_bytes());
     
-    println!("\nStarting node...");
+    println!("\n=== COPY-PASTE COMMANDS FOR OTHER TERMINAL ===\n");
+    println!("/session {} {} {} {} {}", peer_id, identity, verifying, signed_prekey, signature);
+    println!("/send {} Hello from other terminal!", peer_id);
+    println!("\n===============================================\n");
+    
+    println!("Starting node...");
 
     if let Err(e) = node.start(config).await {
         eprintln!("Failed to start: {}", e);
@@ -44,12 +46,7 @@ async fn main() {
     }
 
     println!("Node started! Listening for peers...\n");
-    println!("Commands:");
-    println!("  /add <peer_id> <name> <identity_key_hex>");
-    println!("  /send <peer_id> <message>");
-    println!("  /contacts");
-    println!("  /peers");
-    println!("  /id\n");
+    println!("Commands: /session, /send, /contacts, /peers, /id\n");
     println!("---");
 
     // Event loop
@@ -71,6 +68,9 @@ async fn main() {
                     }
                     Some(NodeEvent::MessageReceived { peer_id, envelope }) => {
                         // Pass to messaging manager
+                        println!("[DEBUG] Received message from network peer: {}", peer_id);
+                        println!("[DEBUG] Envelope sender_peer_id: {}", envelope.sender_peer_id);
+                        println!("[DEBUG] Envelope encrypted: {}", envelope.encrypted);
                         if let Err(e) = messaging.handle_incoming(&peer_id, &envelope.to_bytes()) {
                             println!("[ERROR] Failed to handle message: {}", e);
                         }
@@ -149,6 +149,12 @@ async fn main() {
                                 match messaging.send_message(peer_id, msg_text) {
                                     Ok(msg_id) => {
                                         println!("[SENDING] Message {} to {}", msg_id, peer_id);
+                                        // Actually send the queued message
+                                        while let Some(outgoing) = messaging.next_outgoing() {
+                                            if let Err(e) = node.send_raw_message(outgoing.peer_id.clone(), outgoing.data).await {
+                                                println!("[ERROR] Network send failed: {}", e);
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         println!("[ERROR] Send failed: {}", e);
@@ -174,9 +180,69 @@ async fn main() {
                         } else if cmd == "/id" {
                             println!("My Peer ID: {}", node.peer_id());
                             println!("My Identity Key: {}", node.public_key_hex());
+                        } else if cmd.starts_with("/session ") {
+                            // /session <peer_id> <identity_x25519_hex> <verifying_ed25519_hex> <signed_prekey_hex> <signature_hex>
+                            let parts: Vec<&str> = cmd.splitn(6, ' ').collect();
+                            if parts.len() == 6 {
+                                let peer_id = parts[1];
+                                let identity_hex = parts[2];
+                                let verifying_hex = parts[3];
+                                let signed_prekey_hex = parts[4];
+                                let signature_hex = parts[5];
+                                
+                                match (
+                                    hex::decode(identity_hex),
+                                    hex::decode(verifying_hex),
+                                    hex::decode(signed_prekey_hex),
+                                    hex::decode(signature_hex),
+                                ) {
+                                    (Ok(id), Ok(ver), Ok(spk), Ok(sig)) if id.len() == 32 && ver.len() == 32 && spk.len() == 32 && sig.len() == 64 => {
+                                        // Build PreKeyBundle
+                                        use securechat_core::crypto::keys::PreKeyBundle;
+                                        use ed25519_dalek::{VerifyingKey, Signature};
+                                        
+                                        let mut identity_key = [0u8; 32];
+                                        let mut verifying_key = [0u8; 32];
+                                        let mut signed_prekey = [0u8; 32];
+                                        let mut sig_bytes = [0u8; 64];
+                                        identity_key.copy_from_slice(&id);
+                                        verifying_key.copy_from_slice(&ver);
+                                        signed_prekey.copy_from_slice(&spk);
+                                        sig_bytes.copy_from_slice(&sig);
+                                        
+                                        let bundle = PreKeyBundle {
+                                            identity_key: identity_key.into(),
+                                            identity_verifying_key: VerifyingKey::from_bytes(&verifying_key).unwrap(),
+                                            signed_prekey: signed_prekey.into(),
+                                            signed_prekey_id: 1,
+                                            signed_prekey_signature: Signature::from_bytes(&sig_bytes),
+                                            one_time_prekey: None,
+                                        };
+                                        
+                                        // Add contact first
+                                        messaging.add_contact(peer_id, peer_id, identity_key);
+                                        
+                                        // Then initiate session
+                                        match messaging.initiate_session(peer_id, &bundle) {
+                                            Ok(_) => println!("[SESSION] Established with {}", peer_id),
+                                            Err(e) => println!("[ERROR] Session failed: {}", e),
+                                        }
+                                        
+                                        // Send session init message
+                                        while let Some(outgoing) = messaging.next_outgoing() {
+                                            if let Err(e) = node.send_raw_message(outgoing.peer_id.clone(), outgoing.data).await {
+                                                println!("[ERROR] Failed to send session init: {}", e);
+                                            }
+                                        }
+                                    }
+                                    _ => println!("[ERROR] Invalid hex keys. Need 32-byte identity, 32-byte verifying, 32-byte prekey, 64-byte signature"),
+                                }
+                            } else {
+                                println!("Usage: /session <peer_id> <identity_x25519> <verifying_ed25519> <signed_prekey> <signature>");
+                            }
                         } else {
                             println!("Unknown command. Available:");
-                            println!("  /add <peer_id> <name> <identity_key_hex>");
+                            println!("  /session <peer_id> <identity> <signed_prekey> <signature>  (establish encrypted session)");
                             println!("  /send <peer_id> <message>");
                             println!("  /contacts");
                             println!("  /peers");
