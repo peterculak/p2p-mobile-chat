@@ -6,7 +6,7 @@ use x25519_dalek::PublicKey as X25519PublicKey;
 use serde::{Serialize, Deserialize};
 
 use crate::crypto::keys::{IdentityKeyPair, SignedPreKey, OneTimePreKey, PreKeyBundle};
-use crate::crypto::x3dh::{X3DH, X3DHSession, X3DHError};
+use crate::crypto::x3dh::{X3DH, X3DHError};
 use crate::crypto::ratchet::{DoubleRatchet, EncryptedPayload, RatchetError};
 
 /// A secure messaging session with a peer

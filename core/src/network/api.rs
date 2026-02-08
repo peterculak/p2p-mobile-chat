@@ -47,6 +47,7 @@ pub enum NetworkEvent {
     Listening { address: String },
     PeerDiscovered { peer: PeerInfo },
     PeerDisconnected { peer_id: String },
+    PeerConnected { peer_id: String },
     MessageReceived { peer_id: String, data: Vec<u8> },
     Error { message: String },
 }
@@ -63,7 +64,8 @@ impl From<NodeEvent> for NetworkEvent {
                 let data = envelope.to_bytes();
                 NetworkEvent::MessageReceived { peer_id, data }
             },
-            NodeEvent::Error { message } => NetworkEvent::Error { message }, // Kept original as requested change was type-incorrect
+            NodeEvent::PeerConnected { peer_id } => NetworkEvent::PeerConnected { peer_id },
+            NodeEvent::Error { message } => NetworkEvent::Error { message },
         }
     }
 }
@@ -154,6 +156,14 @@ impl NetworkManager {
         self.runtime.block_on(async {
             node.get_peers().await.into_iter().map(|p| p.into()).collect()
         })
+    }
+
+    /// Dial a peer address
+    pub fn dial(&self, address: String) -> Result<(), NetworkError> {
+        let mut node = self.node.lock().unwrap();
+        self.runtime.block_on(async {
+            node.dial(&address).await
+        }).map_err(|_| NetworkError::ConnectionFailed)
     }
 
     /// Poll for the next event (non-blocking)

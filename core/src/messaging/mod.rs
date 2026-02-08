@@ -2,7 +2,7 @@
 //!
 //! Combines the network layer with crypto to enable secure messaging.
 
-mod protocol;
+pub mod protocol;
 mod handler;
 mod contact;
 pub mod manager;

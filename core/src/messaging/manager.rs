@@ -7,6 +7,8 @@ use crate::messaging::contact::{Contact, ContactStore};
 use crate::messaging::handler::{MessageHandler, HandlerError};
 use crate::crypto::keys::PreKeyBundle;
 use crate::crypto::session::{InitialMessage, SessionError};
+use tracing::info;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 /// Events from the messaging system
 #[derive(Debug, Clone)]
@@ -29,6 +31,15 @@ pub enum MessagingEvent {
     DeliveryReceipt {
         peer_id: String,
         message_id: String,
+    },
+    /// Relay announcement received
+    RelayAnnouncement {
+        peer_id: String,
+        public_key_hex: String,
+    },
+    /// Onion packet received
+    OnionPacketReceived {
+        data: Vec<u8>,
     },
     /// Error occurred
     Error {
@@ -153,59 +164,109 @@ impl MessagingManager {
         Ok(msg_id)
     }
 
-    /// Process incoming data from network
-    pub fn handle_incoming(&mut self, from_peer_id: &str, data: &[u8]) -> Result<(), MessagingError> {
+    /// Prepare an encrypted message but do not queue it (for onion routing)
+    pub fn prepare_encrypted_message(&mut self, peer_id: &str, text: &str) -> Result<(String, Vec<u8>), MessagingError> {
+        let msg = Message::text(text);
+        let msg_id = msg.id.clone();
+        
+        if !self.store.has_session(peer_id) {
+            return Err(MessagingError::NoSession);
+        }
+        
+        let envelope = self.handler.prepare_outgoing(&mut self.store, peer_id, &msg)
+            .map_err(|e| MessagingError::Handler(e))?;
+            
+        Ok((msg_id, envelope.to_bytes()))
+    }
+
+    pub fn handle_incoming(&mut self, _from_peer_id: &str, data: &[u8]) -> Result<(), MessagingError> {
         let envelope = MessageEnvelope::from_bytes(data)
             .map_err(|_| MessagingError::InvalidMessage)?;
 
-        // Handle based on message type
+        // For all identity and session logic, we MUST use the sender ID from the envelope.
+        // The `_from_peer_id` argument is the immediate transport sender (e.g. a relay),
+        // but `envelope.sender_peer_id` is the original cryptographic sender.
+        let sender_peer_id = &envelope.sender_peer_id;
+        
+        info!("handle_incoming: envelope from {} (immediate: {}), encrypted: {}", 
+            sender_peer_id, _from_peer_id, envelope.encrypted);
+
         if !envelope.encrypted {
-            // Unencrypted - could be session init
-            let msg = Message::from_bytes(&envelope.payload)
-                .map_err(|_| MessagingError::InvalidMessage)?;
-            
-            match msg.message_type {
-                MessageType::SessionInit => {
-                    self.handle_session_init(from_peer_id, &msg)?;
+            if let Ok(msg) = Message::from_bytes(&envelope.payload) {
+                info!("handle_incoming: Decoded unencrypted message: type={:?}, id={}", 
+                    msg.message_type, msg.id);
+                
+                match msg.message_type {
+                    MessageType::SessionInit => {
+                        self.handle_session_init(sender_peer_id, &msg)?;
+                    }
+                    MessageType::Text => {
+                         info!("handle_incoming: Received unencrypted TEXT from {}", sender_peer_id);
+                         // Allow unencrypted text messages for testing/fallback
+                         self.events.push_back(MessagingEvent::MessageReceived {
+                            from_peer_id: sender_peer_id.clone(),
+                            message: msg.clone(),
+                         });
+                    }
+                    MessageType::RelayAnnouncement => {
+                        self.events.push_back(MessagingEvent::RelayAnnouncement {
+                            peer_id: sender_peer_id.clone(),
+                            public_key_hex: msg.content.clone(),
+                        });
+                    }
+                    MessageType::OnionPacket => {
+                        if let Ok(data) = BASE64.decode(&msg.content) {
+                            self.events.push_back(MessagingEvent::OnionPacketReceived { data });
+                        }
+                    }
+                    _ => {
+                        // Other unencrypted messages not allowed after session
+                        return Err(MessagingError::EncryptionRequired);
+                    }
                 }
-                MessageType::Text => {
-                     // Allow unencrypted text messages for testing/fallback
-                     self.events.push_back(MessagingEvent::MessageReceived {
-                        from_peer_id: from_peer_id.to_string(),
-                        message: msg.clone(),
-                     });
-                }
-                _ => {
-                    // Other unencrypted messages not allowed after session
-                    return Err(MessagingError::EncryptionRequired);
-                }
+            } else {
+                return Err(MessagingError::InvalidMessage);
             }
         } else {
             // Encrypted message
             let msg = self.handler.process_incoming(&mut self.store, &envelope)
-                .map_err(|e| MessagingError::Handler(e))?;
+                .map_err(|e| {
+                    info!("handle_incoming: ERROR decrypting message from {}: {}", sender_peer_id, e);
+                    MessagingError::Handler(e)
+                })?;
+            
+            info!("handle_incoming: Successfully decrypted message: type={:?}, id={}", 
+                msg.message_type, msg.id);
             
             match msg.message_type {
                 MessageType::Text => {
+                    info!("handle_incoming: Pushing MessageReceived event for {} from ORIGINAL sender {}", msg.id, sender_peer_id);
                     self.events.push_back(MessagingEvent::MessageReceived {
-                        from_peer_id: from_peer_id.to_string(),
+                        from_peer_id: sender_peer_id.clone(),
                         message: msg.clone(),
                     });
                     
                     // Send receipt
-                    self.send_receipt(from_peer_id, &msg.id)?;
+                    info!("handle_incoming: Sending receipt for {} to ORIGINAL sender {}", msg.id, sender_peer_id);
+                    self.send_receipt(sender_peer_id, &msg.id)?;
                 }
                 MessageType::Receipt => {
                     self.events.push_back(MessagingEvent::DeliveryReceipt {
-                        peer_id: from_peer_id.to_string(),
+                        peer_id: sender_peer_id.clone(),
                         message_id: msg.content.clone(),
+                    });
+                }
+                MessageType::RelayAnnouncement => {
+                    self.events.push_back(MessagingEvent::RelayAnnouncement {
+                        peer_id: sender_peer_id.clone(),
+                        public_key_hex: msg.content.clone(),
                     });
                 }
                 _ => {}
             }
             
             // Update last message time
-            if let Some(contact) = self.store.get_contact_mut(from_peer_id) {
+            if let Some(contact) = self.store.get_contact_mut(sender_peer_id) {
                 contact.last_message_at = Some(now_ms());
             }
         }
@@ -215,6 +276,7 @@ impl MessagingManager {
 
     /// Handle session initialization from another peer
     fn handle_session_init(&mut self, from_peer_id: &str, msg: &Message) -> Result<(), MessagingError> {
+        info!("handle_session_init: initiating session with {}", from_peer_id);
         let data: InitialMessageData = serde_json::from_str(&msg.content)
             .map_err(|_| MessagingError::InvalidMessage)?;
         

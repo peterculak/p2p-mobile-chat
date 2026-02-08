@@ -12,6 +12,7 @@ use sha2::{Sha256, Digest};
 pub mod network;
 pub mod crypto;
 pub mod messaging;
+pub mod privacy;
 pub mod api;
 pub mod logger;
 
@@ -33,6 +34,7 @@ pub use messaging::{Contact, ContactStore};
 
 // Re-export API types
 pub use api::messaging::{MessagingAPI, OutgoingMessage, MessagingAPIEvent, create_messaging_manager};
+pub use api::privacy::{PrivacyAPI, PrivacyAPIEvent, OutgoingOnionPacket, create_privacy_manager};
 
 // Include UniFFI scaffolding
 uniffi::include_scaffolding!("securechat_core");

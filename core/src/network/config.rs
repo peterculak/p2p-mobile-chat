@@ -28,7 +28,7 @@ impl Default for NetworkConfig {
             enable_mdns: true,
             enable_kad: true,
             bootstrap_peers: Vec::new(),
-            idle_timeout: Duration::from_secs(60),
+            idle_timeout: Duration::from_secs(300),
         }
     }
 }
@@ -41,7 +41,7 @@ impl NetworkConfig {
             enable_mdns: true,
             enable_kad: false,
             bootstrap_peers: Vec::new(),
-            idle_timeout: Duration::from_secs(60),
+            idle_timeout: Duration::from_secs(300),
         }
     }
 }

@@ -40,6 +40,13 @@ pub enum MessagingAPIEvent {
         peer_id: String,
         message_id: String,
     },
+    RelayAnnouncement {
+        peer_id: String,
+        public_key_hex: String,
+    },
+    OnionPacketReceived {
+        data: Vec<u8>,
+    },
     Error {
         message: String,
     },
@@ -63,6 +70,12 @@ impl From<InternalEvent> for MessagingAPIEvent {
             },
             InternalEvent::DeliveryReceipt { peer_id, message_id } => {
                 MessagingAPIEvent::DeliveryReceipt { peer_id, message_id }
+            },
+            InternalEvent::RelayAnnouncement { peer_id, public_key_hex } => {
+                MessagingAPIEvent::RelayAnnouncement { peer_id, public_key_hex }
+            },
+            InternalEvent::OnionPacketReceived { data } => {
+                MessagingAPIEvent::OnionPacketReceived { data }
             },
             InternalEvent::Error { message } => {
                 MessagingAPIEvent::Error { message }
@@ -119,6 +132,16 @@ impl MessagingAPI {
 
     pub fn list_contacts(&self) -> Vec<ContactInfo> {
         self.manager.lock().unwrap().list_contacts()
+    }
+
+    /// Create an unencrypted envelope wrapping an onion packet (for Swift)
+    pub fn create_onion_envelope(&self, packet_bytes: Vec<u8>) -> Vec<u8> {
+        use crate::messaging::protocol::{Message, MessageEnvelope};
+        let manager = self.manager.lock().unwrap();
+        let my_peer_id = manager.peer_id();
+        let onion_msg = Message::onion_packet(&packet_bytes);
+        let envelope = MessageEnvelope::unencrypted(my_peer_id, &onion_msg);
+        envelope.to_bytes()
     }
 }
 

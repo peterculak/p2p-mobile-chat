@@ -26,14 +26,20 @@
 - [x] Comprehensive tests (38 total)
 
 ## Phase 4: Messaging
-- [ ] Send/receive messages over P2P
-- [ ] Offline storage (DHT)
-- [ ] Contact management
-- [ ] QR code exchange
+- [x] Send/receive messages over P2P (bidirectional CLI ↔ Phone)
+- [ ] Offline storage (DHT) [deferred]
+- [ ] Contact management [deferred]
+- [ ] QR code exchange [deferred]
 
-## Phase 5: Privacy
-- [ ] Onion routing
+## Phase 5: Privacy [Current]
+- [ ] Onion routing layer
+  - [ ] Circuit building (3-hop paths)
+  - [ ] Layered encryption (wrap/unwrap)
+  - [ ] Relay node discovery via DHT
 - [ ] Traffic obfuscation
+  - [ ] Message padding
+  - [ ] Timing jitter
+  - [ ] Decoy traffic
 
 ## Phase 6: Polish
 - [ ] Premium UI

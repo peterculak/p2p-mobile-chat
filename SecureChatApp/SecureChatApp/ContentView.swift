@@ -24,6 +24,7 @@ class AppViewModel: ObservableObject {
     @Published var identity: Identity?
     @Published var fingerprint: String = ""
     @Published var isGenerating: Bool = false
+    @Published var manualAddress: String = ""
     
     // Network state
     @Published var networkManager: NetworkManager?
@@ -31,6 +32,11 @@ class AppViewModel: ObservableObject {
     @Published var discoveredPeers: [PeerInfo] = []
     @Published var listeningAddress: String = ""
     @Published var peerId: String = ""
+    
+    // Privacy state
+    @Published var privacyManager: PrivacyApi?
+    @Published var isOnionEnabled: Bool = false
+    @Published var relayCount: Int = 0
     
     // Callbacks
     var onMessageReceived: ((String, Data) -> Void)?
@@ -51,6 +57,7 @@ class AppViewModel: ObservableObject {
         if networkManager == nil {
             networkManager = createNetworkManager()
             peerId = networkManager?.getPeerId() ?? ""
+            privacyManager = createPrivacyManager()
         }
         
         do {
@@ -70,6 +77,17 @@ class AppViewModel: ObservableObject {
         listeningAddress = ""
     }
     
+    func dialManualAddress() {
+        guard !manualAddress.isEmpty else { return }
+        do {
+            try networkManager?.dial(address: manualAddress)
+            LogManager.shared.info("Manually dialing \(manualAddress)", context: "AppViewModel")
+            manualAddress = ""
+        } catch {
+            LogManager.shared.error("Failed to dial address: \(error)", context: "AppViewModel")
+        }
+    }
+    
     private func startPolling() {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.pollEvents()
@@ -84,9 +102,26 @@ class AppViewModel: ObservableObject {
     private func pollEvents() {
         guard let manager = networkManager else { return }
         
+        // Poll Network Events
         while let event = manager.pollEvent() {
             DispatchQueue.main.async { [weak self] in
                 self?.handleEvent(event)
+            }
+        }
+        
+        // Poll Privacy Events
+        if let privacy = privacyManager {
+            while let event = privacy.nextEvent() {
+                DispatchQueue.main.async { [weak self] in
+                    self?.handlePrivacyEvent(event)
+                }
+            }
+            // Update relay count
+            let currentRelays = Int(privacy.relayCount())
+            if relayCount != currentRelays {
+                DispatchQueue.main.async {
+                    self.relayCount = currentRelays
+                }
             }
         }
     }
@@ -103,15 +138,55 @@ class AppViewModel: ObservableObject {
                 // Haptic feedback
                 let generator = UINotificationFeedbackGenerator()
                 generator.notificationOccurred(.success)
+                
+                // AUTO-DIAL: Try to connect to the discovered peer
+                for addr in peer.addresses {
+                    LogManager.shared.info("Auto-dialing discovered address: \(addr)", context: "AppViewModel")
+                    try? networkManager?.dial(address: addr)
+                }
             }
         case .peerDisconnected(let peerId):
             LogManager.shared.info("Peer disconnected: \(peerId)", context: "AppViewModel")
             discoveredPeers.removeAll { $0.peerId == peerId }
+        case .peerConnected(let peerId):
+            LogManager.shared.info("Peer connected: \(peerId)", context: "AppViewModel")
         case .error(let message):
             LogManager.shared.error("Network error: \(message)", context: "AppViewModel")
         case .messageReceived(let peerId, let data):
             LogManager.shared.debug("Network received message from \(peerId), size: \(data.count)", context: "AppViewModel")
             onMessageReceived?(peerId, Data(data))
+        }
+    }
+    
+    private func handlePrivacyEvent(_ event: PrivacyApiEvent) {
+        switch event {
+        case .relayPacket(let nextPeerId, let packetBytes, let delayMs):
+            LogManager.shared.info("Privacy: Relaying packet to \(nextPeerId) after \(delayMs)ms", context: "AppViewModel")
+            // For now we send immediately, ignoring delay for simplicity in this demo
+            // In a real app we'd use DispatchQueue.main.asyncAfter
+            do {
+                try networkManager?.sendMessage(peerId: nextPeerId, data: packetBytes)
+            } catch {
+                LogManager.shared.error("Failed to relay packet: \(error)", context: "AppViewModel")
+            }
+            
+        case .deliverPayload(let nextPeerId, let payload):
+            LogManager.shared.info("Privacy: Delivering exit payload to \(nextPeerId)", context: "AppViewModel")
+            do {
+                try networkManager?.sendMessage(peerId: nextPeerId, data: payload)
+            } catch {
+                LogManager.shared.error("Failed to deliver payload: \(error)", context: "AppViewModel")
+            }
+            
+        case .packetDelivered(let payload):
+            LogManager.shared.info("Privacy: Packet reached destination (us!), passing to messaging", context: "AppViewModel")
+            onMessageReceived?("privacy-exit", Data(payload))
+            
+        case .circuitBuilt(let circuitId, let hops):
+            LogManager.shared.info("Privacy: Circuit #\(circuitId) built with \(hops) hops", context: "AppViewModel")
+            
+        case .error(let message):
+            LogManager.shared.error("Privacy error: \(message)", context: "AppViewModel")
         }
     }
 }
@@ -374,6 +449,34 @@ struct NetworkTab: View {
             }
             .padding(.horizontal, 24)
             
+            // Manual Connect
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Manual Connect")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.5))
+                
+                HStack {
+                    TextField("Multiaddr (e.g. /ip4/...)", text: $viewModel.manualAddress)
+                        .font(.system(size: 11, design: .monospaced))
+                        .padding(12)
+                        .background(Color.white.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    
+                    Button(action: {
+                        viewModel.dialManualAddress()
+                    }) {
+                        Text("Connect")
+                            .font(.caption.bold())
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(LinearGradient.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            .padding(.horizontal, 24)
+            
             // Discovered peers
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -593,6 +696,26 @@ struct SettingsView: View {
                         Text("Peers")
                         Spacer()
                         Text("\(appViewModel.discoveredPeers.count)")
+                    }
+                }
+                
+                Section("Privacy") {
+                    Toggle("Onion Routing", isOn: $appViewModel.isOnionEnabled)
+                        .onChange(of: appViewModel.isOnionEnabled) { newValue in
+                            appViewModel.privacyManager?.setOnionEnabled(enabled: newValue)
+                        }
+                    
+                    HStack {
+                        Text("Active Relays")
+                        Spacer()
+                        Text("\(appViewModel.relayCount)")
+                            .foregroundColor(appViewModel.relayCount >= 3 ? .green : .orange)
+                    }
+                    
+                    if appViewModel.relayCount < 3 {
+                        Text("At least 3 relays are required for onion routing circuits.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
             }

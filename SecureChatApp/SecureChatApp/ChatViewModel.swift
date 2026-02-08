@@ -90,7 +90,34 @@ class ChatViewModel: ObservableObject {
         
         // Handle outgoing messages
         while let outgoing = messaging.nextOutgoing() {
-            sendNetworkMessage(peerId: outgoing.peerId, data: outgoing.data)
+            // Check if onion routing is enabled via appViewModel
+            if let app = appViewModel, app.isOnionEnabled, 
+               let privacy = app.privacyManager, privacy.canBuildCircuit() {
+                
+                LogManager.shared.info("Chat: Wrapping outgoing message for \(outgoing.peerId) in onion packet", context: "ChatViewModel")
+                if let onion = privacy.wrapMessage(payload: outgoing.data, destinationPeerId: outgoing.peerId) {
+                    LogManager.shared.info("Chat: Sending onion packet via \(onion.entryPeerId)", context: "ChatViewModel")
+                    sendOnionNetworkMessage(entryPeerId: onion.entryPeerId, packetBytes: onion.packetBytes)
+                } else {
+                    LogManager.shared.error("Chat: Failed to wrap message in onion packet, falling back to direct", context: "ChatViewModel")
+                    sendNetworkMessage(peerId: outgoing.peerId, data: outgoing.data)
+                }
+            } else {
+                sendNetworkMessage(peerId: outgoing.peerId, data: outgoing.data)
+            }
+        }
+    }
+    
+    private func sendOnionNetworkMessage(entryPeerId: String, packetBytes: [UInt8]) {
+        guard let network = appViewModel?.networkManager,
+              let messaging = messaging else { return }
+        
+        do {
+            // Use the new helper to wrap in an unencrypted OnionPacket envelope
+            let envelopeData = messaging.createOnionEnvelope(packetBytes: packetBytes)
+            try network.sendMessage(peerId: entryPeerId, data: envelopeData)
+        } catch {
+            print("Failed to send onion packet: \(error)")
         }
     }
     
@@ -119,6 +146,14 @@ class ChatViewModel: ObservableObject {
             
         case .deliveryReceipt(let peerId, let messageId):
             updateMessageStatus(peerId: peerId, messageId: messageId, status: .delivered)
+            
+        case .relayAnnouncement(let peerId, let public_key_hex):
+            print("Received relay announcement from \(peerId)")
+            appViewModel?.privacyManager?.registerRelay(peerId: peerId, publicKeyHex: public_key_hex)
+            
+        case .onionPacketReceived(let data):
+            print("Received onion packet via messaging, passing to privacy manager")
+            let _ = appViewModel?.privacyManager?.processIncoming(packetBytes: data)
             
         case .error(let message):
             print("Messaging error: \(message)")

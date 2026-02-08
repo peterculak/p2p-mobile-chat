@@ -1,6 +1,6 @@
 //! Message handler for processing incoming and outgoing messages
 
-use crate::crypto::session::{EncryptedMessage, SessionError};
+use crate::crypto::session::SessionError;
 use crate::messaging::protocol::{Message, MessageEnvelope};
 use crate::messaging::contact::ContactStore;
 

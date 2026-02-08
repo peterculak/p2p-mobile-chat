@@ -14,6 +14,9 @@ namespace securechat_core {
     // Create a new messaging manager
     MessagingAPI create_messaging_manager(string peer_id);
 
+    // Create a new privacy manager
+    PrivacyAPI create_privacy_manager();
+
     // Initialize the logger callback
     void init_logger(CoreLogger callback);
 };
@@ -45,6 +48,7 @@ dictionary PeerInfo {
 interface NetworkEvent {
     Listening(string address);
     PeerDiscovered(PeerInfo peer);
+    PeerConnected(string peer_id);
     PeerDisconnected(string peer_id);
     MessageReceived(string peer_id, sequence<u8> data);
     Error(string message);
@@ -67,6 +71,10 @@ interface NetworkManager {
     
     // Get connected peers
     sequence<PeerInfo> get_peers();
+    
+    // Dial a multiaddr
+    [Throws=NetworkError]
+    void dial(string address);
     
     // Poll for next event (non-blocking, returns null if no event)
     NetworkEvent? poll_event();
@@ -104,6 +112,9 @@ interface MessagingAPI {
 
     // List all contacts
     sequence<ContactInfo> list_contacts();
+
+    // Create an onion envelope
+    sequence<u8> create_onion_envelope(sequence<u8> packet_bytes);
 };
 
 dictionary ContactInfo {
@@ -123,6 +134,8 @@ interface MessagingAPIEvent {
     MessageSent(string to_peer_id, string message_id);
     SessionEstablished(string peer_id);
     DeliveryReceipt(string peer_id, string message_id);
+    RelayAnnouncement(string peer_id, string public_key_hex);
+    OnionPacketReceived(sequence<u8> data);
     Error(string message);
 };
 
@@ -136,4 +149,33 @@ enum NetworkError {
     "StartFailed",
     "ConnectionFailed",
     "GenericError",
+};
+
+// Privacy API
+interface PrivacyAPI {
+    void set_onion_enabled(boolean enabled);
+    boolean is_onion_enabled();
+    void register_relay(string peer_id, string public_key_hex);
+    void unregister_relay(string peer_id);
+    u64 relay_count();
+    boolean can_build_circuit();
+    string relay_public_key();
+    boolean process_incoming(sequence<u8> packet_bytes);
+    PrivacyAPIEvent? next_event();
+    OutgoingOnionPacket? wrap_message(sequence<u8> payload, string destination_peer_id);
+};
+
+[Enum]
+interface PrivacyAPIEvent {
+    RelayPacket(string next_peer_id, sequence<u8> packet_bytes, u64 delay_ms);
+    PacketDelivered(sequence<u8> payload);
+    DeliverPayload(string next_peer_id, sequence<u8> payload);
+    CircuitBuilt(u64 circuit_id, u64 hops);
+    Error(string message);
+};
+
+dictionary OutgoingOnionPacket {
+    string entry_peer_id;
+    sequence<u8> packet_bytes;
+    u64 delay_ms;
 };

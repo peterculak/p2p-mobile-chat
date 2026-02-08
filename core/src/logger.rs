@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex, OnceLock};
-use tracing::{Subscriber, Event, Level};
+use std::sync::{Arc, OnceLock};
+use tracing::{Subscriber, Event};
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::Layer;
 

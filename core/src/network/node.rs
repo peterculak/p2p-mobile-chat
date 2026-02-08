@@ -34,6 +34,8 @@ pub enum NodeEvent {
     PeerDiscovered { peer: PeerInfo },
     /// Peer disconnected
     PeerDisconnected { peer_id: String },
+    /// Peer connected (TCP/Noise handshake complete)
+    PeerConnected { peer_id: String },
     /// Error occurred
     Error { message: String },
     /// Message received from peer
@@ -204,6 +206,9 @@ impl P2PNode {
                             SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                                 info!("Connected to peer: {peer_id}");
                                 connected_peers.write().await.insert(peer_id);
+                                let _ = event_tx.send(NodeEvent::PeerConnected {
+                                    peer_id: peer_id.to_string(),
+                                }).await;
                             }
                             SwarmEvent::IncomingConnectionError { error, .. } => {
                                 error!("Incoming connection error: {:?}", error);
@@ -270,10 +275,15 @@ impl P2PNode {
                                 let _ = reply.send(peers);
                             }
                             Some(NodeCommand::SendMessage { peer_id, envelope }) => {
-                                if let Ok(peer) = peer_id.parse::<PeerId>() {
-                                    swarm.behaviour_mut().chat.send_request(&peer, ChatRequest(envelope));
-                                } else {
-                                    warn!("Invalid peer ID for messaging: {peer_id}");
+                                match peer_id.parse::<PeerId>() {
+                                    Ok(peer) => {
+                                        swarm.behaviour_mut().chat.send_request(&peer, ChatRequest(envelope));
+                                    }
+                                    Err(e) => {
+                                        warn!("Invalid peer ID string for messaging: '{}' (len: {}). Error: {}", peer_id, peer_id.len(), e);
+                                        // Print bytes to detect hidden chars
+                                        warn!("Peer ID bytes: {:?}", peer_id.as_bytes());
+                                    }
                                 }
                             }
                             Some(NodeCommand::Dial(addr)) => {

@@ -4,6 +4,7 @@
 
 use serde::{Serialize, Deserialize};
 use crate::crypto::session::EncryptedMessage;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 /// Message types
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,6 +21,10 @@ pub enum MessageType {
     Typing,
     /// Key exchange request
     KeyExchange,
+    /// Relay announcement (auto-discovery)
+    RelayAnnouncement,
+    /// Onion routed packet (Sphinx)
+    OnionPacket,
 }
 
 /// Plaintext message content
@@ -46,13 +51,22 @@ impl Message {
         }
     }
 
-    /// Create a session init message with prekey bundle
     pub fn session_init(bundle_json: &str) -> Self {
         Self {
             id: uuid(),
             message_type: MessageType::SessionInit,
             timestamp: now_ms(),
             content: bundle_json.to_string(),
+        }
+    }
+
+    /// Create an onion packet message (content is base64 encoded packet)
+    pub fn onion_packet(packet_bytes: &[u8]) -> Self {
+        Self {
+            id: uuid(),
+            message_type: MessageType::OnionPacket,
+            timestamp: now_ms(),
+            content: BASE64.encode(packet_bytes),
         }
     }
 
@@ -73,6 +87,16 @@ impl Message {
             message_type: MessageType::Receipt,
             timestamp: now_ms(),
             content: message_id.to_string(),
+        }
+    }
+
+    /// Create a relay announcement (public key hex)
+    pub fn relay_announcement(public_key_hex: &str) -> Self {
+        Self {
+            id: uuid(),
+            message_type: MessageType::RelayAnnouncement,
+            timestamp: now_ms(),
+            content: public_key_hex.to_string(),
         }
     }
 
