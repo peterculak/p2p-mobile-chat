@@ -27,6 +27,11 @@ DerivedData/
 *.so
 *.dylib
 
+# UniFFI generated bindings (regenerated from .udl)
+**/securechat_core.swift
+**/securechat_coreFFI.h
+**/securechat_coreFFI.modulemap
+
 # macOS
 .DS_Store
 .AppleDouble
