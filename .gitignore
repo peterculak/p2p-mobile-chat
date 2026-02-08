@@ -22,6 +22,11 @@ DerivedData/
 # Generated bindings (can be regenerated)
 /ios-bindings/
 
+# Compiled Rust libraries (build artifacts)
+*.a
+*.so
+*.dylib
+
 # macOS
 .DS_Store
 .AppleDouble
