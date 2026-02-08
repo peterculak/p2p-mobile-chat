@@ -127,14 +127,13 @@ impl MessagingManager {
         let msg = Message::text(text);
         let msg_id = msg.id.clone();
         
-        // Try to encrypt if we have a session, otherwise send unencrypted (fallback/testing)
-        let envelope = if self.store.has_session(peer_id) {
-            self.handler.prepare_outgoing(&mut self.store, peer_id, &msg)
-                .map_err(|e| MessagingError::Handler(e))?
-        } else {
-            // Unencrypted fallback
-            MessageEnvelope::unencrypted(&self.peer_id, &msg)
-        };
+        // Require encryption - no unencrypted fallback
+        if !self.store.has_session(peer_id) {
+            return Err(MessagingError::NoSession);
+        }
+        
+        let envelope = self.handler.prepare_outgoing(&mut self.store, peer_id, &msg)
+            .map_err(|e| MessagingError::Handler(e))?;
         
         self.outgoing.push_back(OutgoingMessage {
             peer_id: peer_id.to_string(),
