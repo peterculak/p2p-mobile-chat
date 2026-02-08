@@ -138,8 +138,6 @@ class ChatViewModel: ObservableObject {
             let realId = try messaging.sendMessage(peerId: peerId, text: text)
             // Update ID and status
             if let index = messages[peerId]?.firstIndex(where: { $0.id == tempId }) {
-                var updated = messages[peerId]![index]
-                // Create new message with real ID
                  let finalMessage = ChatMessage(
                     id: realId,
                     senderId: "me",
@@ -150,10 +148,30 @@ class ChatViewModel: ObservableObject {
                 )
                 messages[peerId]?[index] = finalMessage
             }
+        } catch MessagingApiError.NoSession {
+            print("[SECURITY] No encrypted session with peer - cannot send message")
+            updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
+            // Add system message about session
+            addSystemMessage(peerId: peerId, text: "⚠️ No secure session. Add contact with their identity key first.")
         } catch {
             print("[DEBUG_ERROR] Failed to send message: \(error)")
             updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
         }
+    }
+    
+    private func addSystemMessage(peerId: String, text: String) {
+        let systemMsg = ChatMessage(
+            id: "system-\(UUID().uuidString)",
+            senderId: "system",
+            text: text,
+            timestamp: Date(),
+            isMe: false,
+            status: .delivered
+        )
+        if messages[peerId] == nil {
+            messages[peerId] = []
+        }
+        messages[peerId]?.append(systemMsg)
     }
     
     func addContact(peerId: String, name: String, identityKeyHex: String) {

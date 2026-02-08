@@ -35,15 +35,13 @@ Build a truly private messenger where:
 - Local mDNS discovery for LAN messaging
 - NAT traversal for direct connections
 
-## Security Warning
+## Security
 
-<div style="background-color: #ffcccc; color: #cc0000; padding: 10px; border-radius: 5px; font-weight: bold;">
-⚠️ SECURITY WARNING: DEVELOPMENT MODE ⚠️
+✅ **All messages are end-to-end encrypted using the Signal Protocol.**
 
-The core `messaging::manager` currently allows UNENCRYPTED messages as a fallback for testing against `p2p-test` peers.
-This allows plain-text messages on the network if no crypto session exists. 
-**This behavior MUST be disabled via compilation flags before any production release.**
-</div>
+- X3DH key exchange for session establishment
+- Double Ratchet for forward secrecy
+- Messages cannot be sent without an encrypted session
 
 ## Technology Stack
 
