@@ -298,6 +298,13 @@ impl P2PNode {
         Ok(())
     }
 
+    /// Send raw message bytes (for MessagingManager integration)
+    pub async fn send_raw_message(&mut self, peer_id: String, data: Vec<u8>) -> Result<(), String> {
+        let envelope = MessageEnvelope::from_bytes(&data)
+            .map_err(|e| format!("Failed to parse envelope: {}", e))?;
+        self.send_message(peer_id, envelope).await
+    }
+
     /// Stop the P2P node
     pub async fn stop(&mut self) -> Result<(), String> {
         if let Some(tx) = &self.command_tx {
