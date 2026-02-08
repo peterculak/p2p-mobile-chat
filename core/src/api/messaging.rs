@@ -1,4 +1,4 @@
-use crate::messaging::manager::{MessagingManager, MessagingEvent as InternalEvent, OutgoingMessage as InternalOutgoing};
+use crate::messaging::manager::{MessagingManager, MessagingEvent as InternalEvent, OutgoingMessage as InternalOutgoing, ContactInfo};
 use crate::crypto::keys::PreKeyBundle;
 use std::sync::{Arc, Mutex};
 
@@ -115,6 +115,10 @@ impl MessagingAPI {
 
     pub fn next_event(&self) -> Option<MessagingAPIEvent> {
         self.manager.lock().unwrap().next_event().map(|e| e.into())
+    }
+
+    pub fn list_contacts(&self) -> Vec<ContactInfo> {
+        self.manager.lock().unwrap().list_contacts()
     }
 }
 

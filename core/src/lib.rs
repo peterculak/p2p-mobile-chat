@@ -13,6 +13,10 @@ pub mod network;
 pub mod crypto;
 pub mod messaging;
 pub mod api;
+pub mod logger;
+
+// Re-export logger types
+pub use logger::{init_logger, CoreLogger};
 
 // Re-export network API types for UniFFI
 pub use network::{NetworkManager, NetworkError, create_network_manager};
@@ -24,7 +28,7 @@ pub use crypto::{Session, SessionError, EncryptedMessage};
 
 // Re-export messaging types
 pub use messaging::{Message, MessageType, MessageEnvelope};
-pub use messaging::{MessagingManager, MessagingError, MessagingEvent};
+pub use messaging::{MessagingManager, MessagingError, MessagingEvent, ContactInfo};
 pub use messaging::{Contact, ContactStore};
 
 // Re-export API types

@@ -10,7 +10,7 @@ pub mod manager;
 pub use protocol::{Message, MessageType, MessageEnvelope, ProtocolError};
 pub use handler::MessageHandler;
 pub use contact::{Contact, ContactStore};
-pub use manager::{MessagingManager, MessagingError, MessagingEvent};
+pub use manager::{MessagingManager, MessagingError, MessagingEvent, ContactInfo};
 
 #[cfg(test)]
 mod tests;

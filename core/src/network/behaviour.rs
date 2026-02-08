@@ -32,10 +32,10 @@ pub struct NodeBehaviour {
 /// Events from our combined behaviour
 #[derive(Debug)]
 pub enum BehaviourEvent {
-    Kad(kad::Event),
-    Mdns(mdns::Event),
     Identify(identify::Event),
     Ping(ping::Event),
+    Mdns(mdns::Event),
+    Kad(kad::Event),
     Chat(ChatEvent),
 }
 
@@ -62,6 +62,10 @@ impl From<ping::Event> for BehaviourEvent {
         BehaviourEvent::Ping(event)
     }
 }
+
+
+
+
 
 impl From<ChatEvent> for BehaviourEvent {
     fn from(event: ChatEvent) -> Self {

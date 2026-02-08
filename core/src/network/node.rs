@@ -133,7 +133,8 @@ impl P2PNode {
             transport,
             behaviour,
             local_peer_id,
-            libp2p::swarm::Config::with_tokio_executor(),
+            libp2p::swarm::Config::with_tokio_executor()
+                .with_idle_connection_timeout(config.idle_timeout),
         );
 
         // Listen on configured port
@@ -204,19 +205,29 @@ impl P2PNode {
                                 info!("Connected to peer: {peer_id}");
                                 connected_peers.write().await.insert(peer_id);
                             }
-                            SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                                info!("Disconnected from peer: {peer_id}");
-                                connected_peers.write().await.remove(&peer_id);
+                            SwarmEvent::IncomingConnectionError { error, .. } => {
+                                error!("Incoming connection error: {:?}", error);
                             }
-
+                            SwarmEvent::OutgoingConnectionError { error, .. } => {
+                                error!("Outgoing connection error: {:?}", error);
+                            }
+                            SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
+                                info!("Disconnected from peer: {peer_id}. Cause: {:?}", cause);
+                                connected_peers.write().await.remove(&peer_id);
+                                let _ = event_tx.send(NodeEvent::PeerDisconnected {
+                                    peer_id: peer_id.to_string(),
+                                }).await;
+                            }
                             SwarmEvent::Behaviour(BehaviourEvent::Chat(chat_event)) => {
                                 match chat_event {
                                     request_response::Event::Message { peer, message } => {
                                         match message {
                                             request_response::Message::Request { request, channel, .. } => {
-                                                debug!("Received chat request from {peer}");
+                                                info!("Received chat request from {peer}");
                                                 // Send immediate Ack
-                                                swarm.behaviour_mut().chat.send_response(channel, ChatResponse(vec![])).ok();
+                                                if let Err(e) = swarm.behaviour_mut().chat.send_response(channel, ChatResponse(vec![])) {
+                                                    error!("Failed to send Chat Ack: {:?}", e);
+                                                }
                                                 
                                                 // Emit event
                                                 let _ = event_tx.send(NodeEvent::MessageReceived {
@@ -228,6 +239,12 @@ impl P2PNode {
                                                 debug!("Received chat response (Ack) from {peer}");
                                             }
                                         }
+                                    }
+                                    request_response::Event::OutboundFailure { peer, request_id, error } => {
+                                        error!("Outbound chat failure to {peer} (req {request_id}): {:?}", error);
+                                    }
+                                    request_response::Event::InboundFailure { peer, error, .. } => {
+                                         error!("Inbound chat failure from {peer}: {:?}", error);
                                     }
                                     _ => {}
                                 }

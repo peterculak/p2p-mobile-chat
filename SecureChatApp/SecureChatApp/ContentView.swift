@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 // MARK: - Color Theme
 extension Color {
@@ -93,8 +94,10 @@ class AppViewModel: ObservableObject {
     private func handleEvent(_ event: NetworkEvent) {
         switch event {
         case .listening(let address):
+            LogManager.shared.info("Network listening on \(address)", context: "AppViewModel")
             listeningAddress = address
         case .peerDiscovered(let peer):
+            LogManager.shared.info("Discovered peer: \(peer.peerId)", context: "AppViewModel")
             if !discoveredPeers.contains(where: { $0.peerId == peer.peerId }) {
                 discoveredPeers.append(peer)
                 // Haptic feedback
@@ -102,10 +105,12 @@ class AppViewModel: ObservableObject {
                 generator.notificationOccurred(.success)
             }
         case .peerDisconnected(let peerId):
+            LogManager.shared.info("Peer disconnected: \(peerId)", context: "AppViewModel")
             discoveredPeers.removeAll { $0.peerId == peerId }
         case .error(let message):
-            print("Network error: \(message)")
+            LogManager.shared.error("Network error: \(message)", context: "AppViewModel")
         case .messageReceived(let peerId, let data):
+            LogManager.shared.debug("Network received message from \(peerId), size: \(data.count)", context: "AppViewModel")
             onMessageReceived?(peerId, Data(data))
         }
     }
@@ -148,6 +153,15 @@ struct ContentView: View {
                         Text("Chats")
                     }
                     .tag(2)
+                
+                SettingsView()
+                    .environmentObject(viewModel)
+                    .environmentObject(chatViewModel)
+                    .tabItem {
+                        Image(systemName: "gear")
+                        Text("Settings")
+                    }
+                    .tag(3)
             }
             .accentColor(.accentEnd)
         }
@@ -520,6 +534,145 @@ struct IdentityCard: View {
     }
 }
 
+// MARK: - Settings View
+struct SettingsView: View {
+    @EnvironmentObject var appViewModel: AppViewModel
+    @EnvironmentObject var chatViewModel: ChatViewModel
+    
+    var cliSessionCommand: String {
+        guard let bundleJson = chatViewModel.prekeyBundleJson,
+              let data = bundleJson.data(using: .utf8),
+              let bundle = try? JSONDecoder().decode(PreKeyBundleDTO.self, from: data) else {
+            return "Loading..."
+        }
+        let identity = bundle.identity_key.map { String(format: "%02x", $0) }.joined()
+        let verifying = bundle.identity_verifying_key.map { String(format: "%02x", $0) }.joined()
+        let prekey = bundle.signed_prekey.map { String(format: "%02x", $0) }.joined()
+        let sig = bundle.signed_prekey_signature.map { String(format: "%02x", $0) }.joined()
+        return "/session \(appViewModel.peerId) \(identity) \(verifying) \(prekey) \(sig)"
+    }
+    
+    var cliSendCommand: String {
+        "/send \(appViewModel.peerId) Hello from CLI!"
+    }
+    
+    var body: some View {
+        NavigationView {
+            List {
+                Section("CLI Commands (tap to copy)") {
+                    Button(action: { UIPasteboard.general.string = cliSessionCommand }) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Session Command")
+                                .font(.caption.bold())
+                            Text(cliSessionCommand)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(3)
+                        }
+                    }
+                    
+                    Button(action: { UIPasteboard.general.string = cliSendCommand }) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Send Command")
+                                .font(.caption.bold())
+                            Text(cliSendCommand)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                Section("Network") {
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        Text(appViewModel.isNetworkRunning ? "Connected" : "Offline")
+                            .foregroundColor(appViewModel.isNetworkRunning ? .green : .red)
+                    }
+                    HStack {
+                        Text("Peers")
+                        Spacer()
+                        Text("\(appViewModel.discoveredPeers.count)")
+                    }
+                }
+            }
+            .navigationTitle("Identity")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+        }
+    }
+}
+
+struct PreKeyBundleDTO: Decodable {
+    let identity_key: [UInt8]
+    let identity_verifying_key: [UInt8]
+    let signed_prekey: [UInt8]
+    let signed_prekey_signature: [UInt8]
+}
+
+
 #Preview {
     ContentView()
+}
+
+// MARK: - Logging Manager
+/// Centralized logging manager that bridges Rust logs and provides Swift logging utilities
+class LogManager: CoreLogger {
+    static let shared = LogManager()
+    
+    // Explicitly typed to avoid ambiguity
+    private let osLogger = os.Logger(subsystem: "com.securechat.app", category: "RustCore")
+    private let swiftLogger = os.Logger(subsystem: "com.securechat.app", category: "SwiftApp")
+    
+    // Log levels to enable (simple toggle)
+    var isDebugEnabled = true
+    
+    // UDL Low-Level Logger Protocol Implementation
+    func log(level: String, message: String) {
+        guard isDebugEnabled else { return }
+        
+        switch level.lowercased() {
+        case "error":
+            osLogger.error("🔴 [RUST] \(message, privacy: .public)")
+        case "warn":
+            osLogger.warning("⚠️ [RUST] \(message, privacy: .public)")
+        case "info":
+            osLogger.info("ℹ️ [RUST] \(message, privacy: .public)")
+        case "debug":
+            osLogger.debug("🐞 [RUST] \(message, privacy: .public)")
+        default:
+            osLogger.trace("⚪ [RUST] \(message, privacy: .public)")
+        }
+    }
+    
+    // Swift Logging Methods
+    func debug(_ message: String, context: String = "") {
+        guard isDebugEnabled else { return }
+        let ctx = context.isEmpty ? "" : "[\(context)] "
+        swiftLogger.debug("\(ctx)\(message, privacy: .public)")
+    }
+    
+    func info(_ message: String, context: String = "") {
+        let ctx = context.isEmpty ? "" : "[\(context)] "
+        swiftLogger.info("\(ctx)\(message, privacy: .public)")
+    }
+    
+    func error(_ message: String, context: String = "") {
+        let ctx = context.isEmpty ? "" : "[\(context)] "
+        swiftLogger.error("🔴 \(ctx)\(message, privacy: .public)")
+    }
+    
+    // Initialize Rust logging
+    func setup() {
+        print("Initializing Rust Logger...") // Stdout
+        swiftLogger.info("Initializing Rust Logger (OSLog)...")
+        // Call the Rust init_logger function, passing self as the callback
+        initLogger(callback: self)
+        swiftLogger.info("Rust Logger initialization called.")
+    }
 }

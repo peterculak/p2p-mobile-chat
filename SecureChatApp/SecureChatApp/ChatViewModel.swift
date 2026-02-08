@@ -1,11 +1,14 @@
 import SwiftUI
 import Combine
 
+import OSLog
+
 class ChatViewModel: ObservableObject {
     @Published var contacts: [ContactInfo] = []
     @Published var messages: [String: [ChatMessage]] = [:] // PeerID -> Messages
     @Published var selectedPeerId: String?
     @Published var searchText = ""
+    @Published var prekeyBundleJson: String?
     
     // Messaging API instance
     private var messaging: MessagingApi?
@@ -63,6 +66,13 @@ class ChatViewModel: ObservableObject {
         print("Initializing MessagingAPI for \(peerId)")
         self.messaging = createMessagingManager(peerId: peerId)
         
+        // Print prekey bundle for CLI testing
+        if let msg = self.messaging {
+            let bundle = msg.getPrekeyBundle()
+            self.prekeyBundleJson = bundle
+            NSLog("PreKey Bundle: %@", bundle)
+        }
+        
         // Start polling for messaging events
         self.pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.pollEvents()
@@ -98,19 +108,28 @@ class ChatViewModel: ObservableObject {
         switch event {
         case .messageReceived(let fromPeerId, let text, let id):
             addMessage(peerId: fromPeerId, text: text, isMe: false, id: id)
+            refreshContacts()
             
         case .messageSent(let toPeerId, let messageId):
             updateMessageStatus(peerId: toPeerId, messageId: messageId, status: .sent)
             
         case .sessionEstablished(let peerId):
             print("Session established with \(peerId)")
-            // Refresh contact status if needed
+            refreshContacts()
             
         case .deliveryReceipt(let peerId, let messageId):
             updateMessageStatus(peerId: peerId, messageId: messageId, status: .delivered)
             
         case .error(let message):
             print("Messaging error: \(message)")
+        }
+    }
+    
+    func refreshContacts() {
+        guard let messaging = messaging else { return }
+        let coreContacts = messaging.listContacts()
+        self.contacts = coreContacts.map { c in
+            ContactInfo(peerId: c.peerId, name: c.name, sessionEstablished: c.sessionEstablished)
         }
     }
     
@@ -148,14 +167,16 @@ class ChatViewModel: ObservableObject {
                 )
                 messages[peerId]?[index] = finalMessage
             }
-        } catch MessagingApiError.NoSession {
-            print("[SECURITY] No encrypted session with peer - cannot send message")
-            updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
-            // Add system message about session
-            addSystemMessage(peerId: peerId, text: "⚠️ No secure session. Add contact with their identity key first.")
         } catch {
-            print("[DEBUG_ERROR] Failed to send message: \(error)")
-            updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
+            let errorString = String(describing: error)
+            if errorString.contains("NoSession") {
+                print("[SECURITY] No encrypted session with peer - cannot send message")
+                updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
+                addSystemMessage(peerId: peerId, text: "⚠️ No secure session. Add contact with their identity key first.")
+            } else {
+                print("[DEBUG_ERROR] Failed to send message: \(error)")
+                updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
+            }
         }
     }
     
@@ -185,12 +206,11 @@ class ChatViewModel: ObservableObject {
         let keyArray = [UInt8](keyBytes)
         
         messaging.addContact(peerId: peerId, name: name, identityKey: keyArray)
-        
-        let info = ContactInfo(peerId: peerId, name: name, sessionEstablished: false)
-        contacts.append(info)
+        refreshContacts()
     }
     
     private func addMessage(peerId: String, text: String, isMe: Bool, id: String) {
+        LogManager.shared.debug("Adding message from \(peerId): \(text)", context: "ChatViewModel")
         let message = ChatMessage(
             id: id,
             senderId: peerId,
@@ -224,12 +244,17 @@ class ChatViewModel: ObservableObject {
     // It MUST pass this data to MessagingAPI.handleIncoming.
     
     func ingestNetworkMessage(peerId: String, data: Data) {
-        guard let messaging = messaging else { return }
+        LogManager.shared.debug("ingestNetworkMessage from \(peerId), len: \(data.count)", context: "ChatViewModel")
+        guard let messaging = messaging else {
+            LogManager.shared.error("Messaging is nil!", context: "ChatViewModel")
+            return
+        }
         do {
             let dataArray = [UInt8](data)
             try messaging.handleIncoming(fromPeerId: peerId, data: dataArray)
+            LogManager.shared.debug("handleIncoming success for \(peerId)", context: "ChatViewModel")
         } catch {
-            print("Failed to handle incoming message: \(error)")
+            LogManager.shared.error("Failed to handle incoming message: \(error.localizedDescription)", context: "ChatViewModel")
         }
     }
 }

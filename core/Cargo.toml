@@ -60,6 +60,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Async utilities
 futures = "0.3"
 async-trait = "0.1"
+void = "1.0"
 
 [build-dependencies]
 uniffi = { version = "0.25", features = ["build"] }

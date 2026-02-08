@@ -13,6 +13,14 @@ namespace securechat_core {
 
     // Create a new messaging manager
     MessagingAPI create_messaging_manager(string peer_id);
+
+    // Initialize the logger callback
+    void init_logger(CoreLogger callback);
+};
+
+// Logger callback interface
+callback interface CoreLogger {
+    void log(string level, string message);
 };
 
 // A user's cryptographic identity
@@ -93,6 +101,15 @@ interface MessagingAPI {
     
     // Get next event (returns null if none)
     MessagingAPIEvent? next_event();
+
+    // List all contacts
+    sequence<ContactInfo> list_contacts();
+};
+
+dictionary ContactInfo {
+    string peer_id;
+    string name;
+    boolean session_established;
 };
 
 dictionary OutgoingMessage {
