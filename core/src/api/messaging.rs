@@ -117,6 +117,11 @@ impl MessagingAPI {
             .map_err(|e| e.to_string())
     }
 
+    pub fn request_session(&self, peer_id: String) -> Result<(), String> {
+        self.manager.lock().unwrap().request_session(&peer_id)
+            .map_err(|e| e.to_string())
+    }
+
     pub fn handle_incoming(&self, from_peer_id: String, data: Vec<u8>) -> Result<(), String> {
         self.manager.lock().unwrap().handle_incoming(&from_peer_id, &data)
             .map_err(|e| e.to_string())

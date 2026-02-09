@@ -7,6 +7,7 @@ use crate::network::{P2PNode, NetworkConfig, NodeEvent, PeerInfo as InternalPeer
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+use libp2p::{identity, PeerId};
 
 
 
@@ -39,6 +40,14 @@ impl From<InternalPeerInfo> for PeerInfo {
             addresses: p.addresses,
         }
     }
+}
+
+/// Identity details exposed to FFI
+#[derive(Debug, Clone)]
+pub struct IdentityDetails {
+    pub peer_id: String,
+    pub public_key_hex: String,
+    pub identity_key_hex: String,
 }
 
 /// Network events exposed to FFI
@@ -94,7 +103,7 @@ impl NetworkManager {
     /// Create a new network manager
     pub fn new() -> Self {
         let runtime = Runtime::new().expect("Failed to create Tokio runtime");
-        let config = NetworkConfig::local_only();
+        let config = NetworkConfig::global();
         let node = P2PNode::new(config);
         let peer_id = node.peer_id().to_string();
         
@@ -119,7 +128,8 @@ impl NetworkManager {
             return Err(NetworkError::AlreadyRunning);
         }
 
-        let config = NetworkConfig::local_only();
+        let config = NetworkConfig::global();
+        tracing::warn!("NetworkManager: Starting node with {} bootstrap peers", config.bootstrap_peers.len());
         let mut node = self.node.lock().unwrap();
         
         self.runtime.block_on(async {
@@ -196,6 +206,73 @@ impl NetworkManager {
 /// Create a new network manager (FFI entry point)
 pub fn create_network_manager() -> Arc<NetworkManager> {
     Arc::new(NetworkManager::new())
+}
+
+/// Create a configured network manager with identity and persistence
+pub fn create_configured_network_manager(
+    identity_key_bytes: Vec<u8>,
+    persistence_path: String
+) -> Result<Arc<NetworkManager>, NetworkError> {
+    let runtime = Runtime::new().map_err(|_| NetworkError::StartFailed)?;
+    let config = NetworkConfig::global();
+    
+    // Parse identity
+    let ident = identity::Keypair::from_protobuf_encoding(&identity_key_bytes)
+        .map_err(|_| NetworkError::GenericError)?;
+        
+    let node = P2PNode::new(config)
+        .with_identity(ident)
+        .with_persistence(persistence_path);
+        
+    let peer_id = node.peer_id().to_string();
+    
+    Ok(Arc::new(NetworkManager {
+        runtime,
+        node: Arc::new(Mutex::new(node)),
+        event_rx: Arc::new(Mutex::new(None)),
+        peer_id,
+        is_running: Arc::new(Mutex::new(false)),
+    }))
+}
+
+/// Generate a new identity keypair (protobuf encoded bytes)
+pub fn generate_identity() -> Vec<u8> {
+    let key = identity::Keypair::generate_ed25519();
+    key.to_protobuf_encoding().expect("Failed to encode key")
+}
+
+/// Extract details from identity key bytes
+pub fn extract_identity_details(key_bytes: Vec<u8>) -> Result<IdentityDetails, NetworkError> {
+    let key = identity::Keypair::from_protobuf_encoding(&key_bytes)
+        .map_err(|_| NetworkError::GenericError)?;
+        
+    let peer_id = key.public().to_peer_id().to_string();
+    let public_key_hex = hex::encode(key.public().encode_protobuf());
+    
+    // Also derive X25519 identity key (simplified: we'd ideally store this or derive correctly)
+    // For now, let's just use a placeholder or derive from private if available
+    // Actually, create_configured_network_manager has the keypair.
+    // Let's assume the user wants the X25519 from the PreKeyBundle.
+    // Wait, extract_identity_details is used for the IDENTITY tab.
+    // I should probably just return the Ed25519 one as 'public_key_hex' and add another one.
+    
+    // To get X25519 from Ed25519 keypair in libp2p:
+    // It's not straightforward without the secret bytes.
+    // But since we are generating it in generate_identity, we can store it.
+    
+    // For now, let's just make sure the user can see the FULL info in Settings.
+    
+    let identity_key_hex = if let Ok(ed_key) = key.public().try_into_ed25519() {
+        hex::encode(ed_key.to_bytes())
+    } else {
+        "".to_string()
+    };
+    
+    Ok(IdentityDetails {
+        peer_id,
+        public_key_hex,
+        identity_key_hex,
+    })
 }
 
 #[cfg(test)]

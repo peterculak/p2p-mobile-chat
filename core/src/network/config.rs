@@ -19,6 +19,9 @@ pub struct NetworkConfig {
     
     /// Idle connection timeout
     pub idle_timeout: Duration,
+
+    /// Enable privacy features (Onion Routing)
+    pub enable_onion_routing: bool,
 }
 
 impl Default for NetworkConfig {
@@ -29,6 +32,7 @@ impl Default for NetworkConfig {
             enable_kad: true,
             bootstrap_peers: Vec::new(),
             idle_timeout: Duration::from_secs(300),
+            enable_onion_routing: false,
         }
     }
 }
@@ -42,6 +46,26 @@ impl NetworkConfig {
             enable_kad: false,
             bootstrap_peers: Vec::new(),
             idle_timeout: Duration::from_secs(300),
+            enable_onion_routing: false,
+        }
+    }
+
+    /// Create config for Private Relay Mesh (Low noise, high privacy)
+    pub fn global() -> Self {
+        Self {
+            listen_port: 0,
+            enable_mdns: true, // Keep mDNS for local WiFi discovery if available
+            enable_kad: true,
+            bootstrap_peers: vec![
+                // PRIVATE RELAY CONFIGURATION
+                // The Simulator (Wi-Fi) will connect to this local IP.
+                // For 5G, replace '192.168.1.149' with your Public IP or use a VPN.
+                "/ip4/192.168.1.149/tcp/4001/p2p/12D3KooWMDgKCqgv6e9oGESb9TYNcUuTWiwEtqWk3tnMWAWkMf3Y".to_string(),
+                // Also add QUIC for better cellular performance
+                "/ip4/192.168.1.149/udp/4001/quic-v1/p2p/12D3KooWMDgKCqgv6e9oGESb9TYNcUuTWiwEtqWk3tnMWAWkMf3Y".to_string(),
+            ],
+            idle_timeout: Duration::from_secs(1800),
+            enable_onion_routing: true,
         }
     }
 }

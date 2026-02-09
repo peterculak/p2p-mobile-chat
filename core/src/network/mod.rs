@@ -8,8 +8,10 @@
 mod node;
 mod behaviour;
 mod config;
+mod persistence;
 pub mod api;
 pub mod chat;
+pub mod relay_node;
 
 pub use node::{P2PNode, NodeEvent, PeerInfo};
 pub use config::NetworkConfig;

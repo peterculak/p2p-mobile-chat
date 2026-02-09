@@ -19,6 +19,17 @@ namespace securechat_core {
 
     // Initialize the logger callback
     void init_logger(CoreLogger callback);
+
+    // Configured Network Manager
+    [Throws=NetworkError]
+    NetworkManager create_configured_network_manager(sequence<u8> identity_key_bytes, string persistence_path);
+
+    // Generate identity as bytes (protobuf)
+    sequence<u8> generate_identity_bytes();
+
+    // Extract details from identity bytes
+    [Throws=NetworkError]
+    IdentityDetails extract_identity_details(sequence<u8> key_bytes);
 };
 
 // Logger callback interface
@@ -41,6 +52,12 @@ dictionary SharedSecret {
 dictionary PeerInfo {
     string peer_id;
     sequence<string> addresses;
+};
+
+dictionary IdentityDetails {
+    string peer_id;
+    string public_key_hex;
+    string identity_key_hex;
 };
 
 // Events from the P2P network
@@ -95,6 +112,10 @@ interface MessagingAPI {
     // Initiate session with peer using their bundle (JSON)
     [Throws=NetworkError]
     void initiate_session(string peer_id, string bundle_json);
+    
+    // Request a session automatically (handshake)
+    [Throws=NetworkError]
+    void request_session(string peer_id);
     
     // Send text message (returns message ID)
     [Throws=NetworkError]

@@ -1,5 +1,8 @@
 import SwiftUI
-import OSLog
+import CoreData
+import os
+import CoreImage.CIFilterBuiltins
+import AVFoundation
 
 // MARK: - Color Theme
 extension Color {
@@ -30,8 +33,21 @@ class AppViewModel: ObservableObject {
     @Published var networkManager: NetworkManager?
     @Published var isNetworkRunning: Bool = false
     @Published var discoveredPeers: [PeerInfo] = []
-    @Published var listeningAddress: String = ""
+    @Published var connectedPeers: Set<String> = []
+    @Published var listeningAddresses: [String] = []
+    
+    var listeningAddress: String {
+        // 1. Prefer relay addresses (bridge)
+        if let relay = listeningAddresses.first(where: { $0.contains("p2p-circuit") }) {
+            return relay
+        }
+        // 2. Otherwise prefer external IP (exclude 127.0.0.1 and loopback)
+        return listeningAddresses.first(where: { 
+            !$0.contains("127.0.0.1") && !$0.contains("::1") && !$0.contains("/localhost/") 
+        }) ?? listeningAddresses.first ?? ""
+    }
     @Published var peerId: String = ""
+    @Published var identityKeyHex: String = ""
     
     // Privacy state
     @Published var privacyManager: PrivacyApi?
@@ -46,18 +62,144 @@ class AppViewModel: ObservableObject {
     func generateNewIdentity() {
         isGenerating = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            // Use generateIdentityBytes which returns [UInt8]
+            let keyBytes = generateIdentityBytes()
+            // Convert to Identity struct if needed, or just use bytes for now?
+            // The UI expects `identity: Identity?`. 
+            // `Identity` struct in UDL/Swift has hex strings.
+            // We can reconstruct Identity from keyBytes using extractIdentityDetails? Or generateIdentity() (the struct one)?
+            // Wait, I left generateIdentity (struct) in UDL!
+            // core/securechat_core.udl: Identity generate_identity();
+            // So generateIdentity() IS VALID and returns Identity struct.
+            // But startNetwork needs BYTES.
+            // So let's use generateIdentity() here for UI, and generateIdentityBytes() in startNetwork?
+            // Problem: they will be DIFFERENT identities if called separately!
+            // We must use one and derive the other.
+            // `extractIdentityDetails(keyBytes: [UInt8]) -> IdentityDetails`.
+            // IdentityDetails has peer_id, public_key_hex.
+            // Identity struct has public_key_hex, private_key_hex.
+            // We can't easily convert [UInt8] to Identity struct (private key hex) without helper.
+            
+            // BETTER: Use generateIdentity() (Returns Identity).
+            // But how to getBYTES from Identity?
+            // Identity has private_key_hex. We can decode hex to bytes.
+            // Swift doesn't have built-in hex decode easily?
+            // helper: `generate_identity_bytes` returns bytes.
+            // helper: `extract_identity_details` returns details.
+            
+            // I'll use generateIdentityBytes() as source of truth.
+            let bytes = generateIdentityBytes()
+            // Saving/Loading logic uses bytes.
+            // UI needs Identity struct?
+            // Identity struct definition:
+            // public struct Identity { public var publicKeyHex: String; public var privateKeyHex: String }
+            // I can construct it if I have hex strings.
+            // extractIdentityDetails(bytes) gives public_key_hex.
+            // private_key_hex?
+            // I'll just use generateIdentity() (struct) and convert to bytes?
+            // To convert struct to bytes: I need to decode private_key_hex.
+            
+            // ALTERNATIVE: Use generateIdentity() (Struct).
+            // Then manually hex-decode private key to get bytes for specific functions?
+            // `createConfiguredNetworkManager` takes bytes.
+            
+            // Let's use `generateIdentity()` (Struct).
             let newIdentity = generateIdentity()
             self?.identity = newIdentity
             self?.fingerprint = getPublicKeyFingerprint(identity: newIdentity)
             self?.isGenerating = false
+            
+            // But wait, startNetwork saves BYTES to disk.
+            // It calls `generateIdentity()` (line 84).
+            // It tries `newKey.write(to: url)`. Identity struct doesn't have .write.
+            // It needs bytes.
         }
     }
     
     func startNetwork() {
         if networkManager == nil {
-            networkManager = createNetworkManager()
+            // Persistence: Load Identity & Path
+            let fileManager = FileManager.default
+            if let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let identityUrl = docs.appendingPathComponent("identity.key")
+                let peersUrl = docs.appendingPathComponent("peers.json")
+                
+                print("Identity Path: \(identityUrl.path)")
+                
+                var keyBytes: Data?
+                
+                // Try to load existing identity
+                if fileManager.fileExists(atPath: identityUrl.path) {
+                    do {
+                        keyBytes = try Data(contentsOf: identityUrl)
+                        print("Loaded existing identity (\(keyBytes?.count ?? 0) bytes)")
+                    } catch {
+                        print("Failed to load identity: \(error)")
+                    }
+                }
+                
+                // If missing or failed, generate new one
+                if keyBytes == nil {
+                    print("Generating NEW identity...")
+                    // Use generateIdentityBytes to get [UInt8], then convert to Data
+                    let keyArray = generateIdentityBytes()
+                    let newData = Data(keyArray)
+                    keyBytes = newData
+                    do {
+                        try newData.write(to: identityUrl)
+                        print("Saved new identity to disk")
+                    } catch {
+                        print("Failed to save identity: \(error)")
+                    }
+                }
+                
+                if let key = keyBytes {
+                    // Convert Data to [UInt8]
+                    let keyArray = [UInt8](key)
+                    do {
+                        // Use global function
+                        networkManager = try createConfiguredNetworkManager(identityKeyBytes: keyArray, persistencePath: peersUrl.path)
+                        print("Network Manager created with persistence")
+                        
+                        // Populate identityKeyHex from current identity
+                        if let details = try? extractIdentityDetails(keyBytes: keyArray) {
+                            self.identityKeyHex = details.identityKeyHex
+                        }
+                    } catch {
+                        print("Failed to create configured network manager: \(error)")
+                        // Fallback (non-persistent)
+                        networkManager = createNetworkManager()
+                    }
+                } else {
+                    networkManager = createNetworkManager()
+                }
+            } else {
+                networkManager = createNetworkManager()
+            }
+            
             peerId = networkManager?.getPeerId() ?? ""
+            
+            print("🚀 APP STARTUP:")
+            print("   PeerID: \(peerId)")
+            print("   Identity Key (X25519): \(identityKeyHex)")
+            LogManager.shared.info("App Startup - PeerID: \(peerId), IdentityKey: \(identityKeyHex)", context: "AppViewModel")
+            
             privacyManager = createPrivacyManager()
+            
+            // Populate Identity model for UI
+            if !peerId.isEmpty {
+                // We don't have the full Identity struct from FFI easily here without parsing
+                // So we'll just use the PeerID for display or reconstruction?
+                // Actually `Identity` struct in UI seems to be a Swift struct based on the code I read
+                // But I can't see the definition.
+                // Let's just set the fingerprint based on PeerID for now?
+                // Or maybe `networkManager` has a method to get public key?
+                // Core `P2PNode` has `public_key_hex()`.
+                // NetworkManager doesn't expose it yet?
+                // Wait, I need to check `api.rs` again.
+                // It exposes `get_peer_id`.
+                // It does NOT expose `get_public_key`.
+            }
         }
         
         do {
@@ -74,7 +216,7 @@ class AppViewModel: ObservableObject {
         isNetworkRunning = false
         stopPolling()
         discoveredPeers = []
-        listeningAddress = ""
+        listeningAddresses = []
     }
     
     func dialManualAddress() {
@@ -83,8 +225,36 @@ class AppViewModel: ObservableObject {
             try networkManager?.dial(address: manualAddress)
             LogManager.shared.info("Manually dialing \(manualAddress)", context: "AppViewModel")
             manualAddress = ""
+            // Clear current list to force refresh when new relay is found
+            listeningAddresses = []
         } catch {
             LogManager.shared.error("Failed to dial address: \(error)", context: "AppViewModel")
+        }
+    }
+    
+    func handleDeepLink(_ url: URL) {
+        // Format: securechat://connect?addr=/ip4/...
+        guard url.scheme == "securechat" else { return }
+        print("Handling deep link: \(url)")
+        
+        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let queryItems = components.queryItems,
+           let addr = queryItems.first(where: { $0.name == "addr" })?.value {
+            
+            print("Deep link connect to: \(addr)")
+            // Delay slightly to ensure network is ready if app just launched
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                do {
+                    // Ensure network is started
+                    if self?.networkManager == nil {
+                        self?.startNetwork()
+                    }
+                    try self?.networkManager?.dial(address: addr)
+                    LogManager.shared.info("Deep link dialing \(addr)", context: "AppViewModel")
+                } catch {
+                    LogManager.shared.error("Deep link dial failed: \(error)", context: "AppViewModel")
+                }
+            }
         }
     }
     
@@ -130,7 +300,9 @@ class AppViewModel: ObservableObject {
         switch event {
         case .listening(let address):
             LogManager.shared.info("Network listening on \(address)", context: "AppViewModel")
-            listeningAddress = address
+            if !listeningAddresses.contains(address) {
+                listeningAddresses.append(address)
+            }
         case .peerDiscovered(let peer):
             LogManager.shared.info("Discovered peer: \(peer.peerId)", context: "AppViewModel")
             if !discoveredPeers.contains(where: { $0.peerId == peer.peerId }) {
@@ -139,17 +311,23 @@ class AppViewModel: ObservableObject {
                 let generator = UINotificationFeedbackGenerator()
                 generator.notificationOccurred(.success)
                 
-                // AUTO-DIAL: Try to connect to the discovered peer
-                for addr in peer.addresses {
-                    LogManager.shared.info("Auto-dialing discovered address: \(addr)", context: "AppViewModel")
-                    try? networkManager?.dial(address: addr)
+                // AUTO-DIAL: Only if not connected
+                if !connectedPeers.contains(peer.peerId) {
+                    // Prefer QUIC or Relay addresses
+                    let bestAddr = peer.addresses.first(where: { $0.contains("quic") || $0.contains("p2p-circuit") }) ?? peer.addresses.first
+                    if let addr = bestAddr {
+                        LogManager.shared.info("Auto-dialing best address: \(addr)", context: "AppViewModel")
+                        try? networkManager?.dial(address: addr)
+                    }
                 }
             }
         case .peerDisconnected(let peerId):
             LogManager.shared.info("Peer disconnected: \(peerId)", context: "AppViewModel")
             discoveredPeers.removeAll { $0.peerId == peerId }
+            connectedPeers.remove(peerId)
         case .peerConnected(let peerId):
             LogManager.shared.info("Peer connected: \(peerId)", context: "AppViewModel")
+            connectedPeers.insert(peerId)
         case .error(let message):
             LogManager.shared.error("Network error: \(message)", context: "AppViewModel")
         case .messageReceived(let peerId, let data):
@@ -193,9 +371,11 @@ class AppViewModel: ObservableObject {
 
 // MARK: - Main Content View
 struct ContentView: View {
-    @StateObject private var viewModel = AppViewModel()
+    @ObservedObject var viewModel: AppViewModel
     @StateObject private var chatViewModel = ChatViewModel()
     @State private var selectedTab = 0
+    @State private var showScanner = false
+    @State private var showInvitation = false
     
     var body: some View {
         ZStack {
@@ -208,7 +388,7 @@ struct ContentView: View {
             .ignoresSafeArea()
             
             TabView(selection: $selectedTab) {
-                IdentityTab(viewModel: viewModel)
+                IdentityTab(viewModel: viewModel, showInvitation: $showInvitation)
                     .tabItem {
                         Image(systemName: "key.fill")
                         Text("Identity")
@@ -254,6 +434,7 @@ struct ContentView: View {
 // MARK: - Identity Tab
 struct IdentityTab: View {
     @ObservedObject var viewModel: AppViewModel
+    @Binding var showInvitation: Bool
     @State private var showCopied = false
     
     var body: some View {
@@ -299,9 +480,29 @@ struct IdentityTab: View {
                     IdentityCard(
                         fingerprint: viewModel.fingerprint,
                         publicKeyHex: identity.publicKeyHex,
+                        identityKeyHex: viewModel.identityKeyHex,
                         showCopied: $showCopied
                     )
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
+                }
+                
+                Spacer()
+                
+                // Invitation / Share
+                if let _ = viewModel.identity, !viewModel.peerId.isEmpty {
+                     Button(action: {
+                        showInvitation = true
+                     }) {
+                        HStack {
+                            Image(systemName: "qrcode")
+                            Text("Share Identity")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Capsule())
+                     }
                 }
                 
                 Spacer()
@@ -362,6 +563,7 @@ struct IdentityTab: View {
 // MARK: - Network Tab
 struct NetworkTab: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var showScanner = false
     
     var body: some View {
         VStack(spacing: 24) {
@@ -526,6 +728,27 @@ struct NetworkTab: View {
             )
             .padding(.horizontal, 24)
             
+            // Scan Button
+            Button(action: {
+                showScanner = true
+            }) {
+                HStack {
+                    Image(systemName: "qrcode.viewfinder")
+                    Text("Scan Friend's QR")
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(.horizontal, 24)
+            .sheet(isPresented: $showScanner) {
+                // ScannerView(viewModel: viewModel)
+                ScannerView(viewModel: viewModel)
+            }
+            
             Spacer()
         }
     }
@@ -569,6 +792,7 @@ struct PeerRow: View {
 struct IdentityCard: View {
     let fingerprint: String
     let publicKeyHex: String
+    let identityKeyHex: String
     @Binding var showCopied: Bool
     
     var body: some View {
@@ -587,7 +811,41 @@ struct IdentityCard: View {
                 .background(Color.white.opacity(0.1))
             
             VStack(spacing: 8) {
-                Text("Public Key")
+                Text("Identity Key (X25519)")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.5))
+                
+                Text(truncatedIdentityKey)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Button(action: {
+                UIPasteboard.general.string = identityKeyHex
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    showCopied = true
+                }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.on.doc")
+                    Text("Copy Identity Key")
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(.accentEnd)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(Color.accentEnd.opacity(0.15))
+                .clipShape(Capsule())
+            }
+            
+            Divider()
+                .background(Color.white.opacity(0.1))
+            
+            VStack(spacing: 8) {
+                Text("Public Key (Ed25519)")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.5))
                 
@@ -607,7 +865,7 @@ struct IdentityCard: View {
             }) {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.on.doc")
-                    Text("Copy Full Key")
+                    Text("Copy Public Key")
                 }
                 .font(.subheadline.weight(.medium))
                 .foregroundColor(.accentEnd)
@@ -631,8 +889,14 @@ struct IdentityCard: View {
     }
     
     private var truncatedKey: String {
-        let prefix = String(publicKeyHex.prefix(20))
-        let suffix = String(publicKeyHex.suffix(20))
+        let prefix = String(publicKeyHex.prefix(12))
+        let suffix = String(publicKeyHex.suffix(12))
+        return "\(prefix)...\(suffix)"
+    }
+    
+    private var truncatedIdentityKey: String {
+        let prefix = String(identityKeyHex.prefix(12))
+        let suffix = String(identityKeyHex.suffix(12))
         return "\(prefix)...\(suffix)"
     }
 }
@@ -740,7 +1004,7 @@ struct PreKeyBundleDTO: Decodable {
 
 
 #Preview {
-    ContentView()
+    ContentView(viewModel: AppViewModel())
 }
 
 // MARK: - Logging Manager
@@ -797,5 +1061,253 @@ class LogManager: CoreLogger {
         // Call the Rust init_logger function, passing self as the callback
         initLogger(callback: self)
         swiftLogger.info("Rust Logger initialization called.")
+    }
+    }
+
+// MARK: - Invitation View
+struct InvitationView: View {
+    let peerId: String
+    let addresses: [String]
+    
+    var connectionString: String {
+        // Format: securechat://invite/PEER_ID/MULTIADDR_BASE64
+        // For now, let's just use the first valid public address or local one
+        if let addr = addresses.first(where: { !$0.contains("127.0.0.1") }) ?? addresses.first {
+             return "securechat://invite/\(peerId)/\(addr)"
+        }
+        return "securechat://invite/\(peerId)/unknown"
+    }
+    
+    let context = CIContext()
+    let filter = CIFilter.qrCodeGenerator()
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Invite a Friend")
+                .font(.title2.bold())
+                .foregroundColor(.white)
+                .padding(.top, 20)
+            
+            Text("Scan this QR code with another SecureChat to connect directly P2P.")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white)
+                    .frame(width: 250, height: 250)
+                
+                if let qrImage = generateQRCode(from: connectionString) {
+                    Image(uiImage: qrImage)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 230, height: 230)
+                } else {
+                    Image(systemName: "xmark.circle")
+                        .font(.largeTitle)
+                        .foregroundColor(.red)
+                }
+            }
+            .shadow(color: .accentStart.opacity(0.5), radius: 20, x: 0, y: 0)
+            
+            VStack(spacing: 8) {
+                Text("YOUR ADDRESS")
+                    .font(.caption2.bold())
+                    .foregroundColor(.white.opacity(0.4))
+                
+                Text(connectionString)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .padding(.horizontal)
+            }
+            
+            Spacer()
+        }
+        .padding()
+        .background(Color.bgSecondary.ignoresSafeArea())
+    }
+    
+    func generateQRCode(from string: String) -> UIImage? {
+        let data = Data(string.utf8)
+        filter.setValue(data, forKey: "inputMessage")
+        
+        if let outputImage = filter.outputImage {
+            // Scale up slightly for sharpness before converting to UIImage
+            let transform = CGAffineTransform(scaleX: 10, y: 10)
+            let scaledImage = outputImage.transformed(by: transform)
+            
+            if let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) {
+                return UIImage(cgImage: cgImage)
+            }
+        }
+        return nil
+    }
+}
+
+// MARK: - Scanner View
+struct ScannerView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Environment(\.presentationMode) var presentationMode
+    
+    var body: some View {
+        ZStack {
+            QrCodeScannerView { code in
+                self.handleScan(code: code)
+            }
+            .edgesIgnoringSafeArea(.all)
+            
+            VStack {
+                Text("Scan Friend's Code")
+                    .font(.headline)
+                    .padding()
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(12)
+                    .padding(.top, 40)
+                
+                Spacer()
+                
+                Button(action: {
+                    presentationMode.wrappedValue.dismiss()
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.largeTitle)
+                        .foregroundColor(.white)
+                        .padding(.bottom, 40)
+                }
+            }
+        }
+    }
+    
+    func handleScan(code: String) {
+        // Format: securechat://invite/PEER_ID/MULTIADDR_BASE64
+        if code.starts(with: "securechat://invite/") {
+            let components = code.components(separatedBy: "/")
+            if components.count >= 5 {
+                let peerId = components[3]
+                let address = components[4..<components.count].joined(separator: "/")
+                
+                LogManager.shared.info("Scanned Invite: \(peerId) at \(address)", context: "ScannerView")
+                
+                // Trigger dial
+                DispatchQueue.main.async {
+                    do {
+                        try viewModel.networkManager?.dial(address: address)
+                        let generator = UINotificationFeedbackGenerator()
+                        generator.notificationOccurred(.success)
+                        self.presentationMode.wrappedValue.dismiss()
+                    } catch {
+                        LogManager.shared.error("Failed to dial scanned address: \(error)", context: "ScannerView")
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct QrCodeScannerView: UIViewControllerRepresentable {
+    var onCodeScanned: (String) -> Void
+    
+    func makeUIViewController(context: Context) -> ScannerViewController {
+        let scanner = ScannerViewController()
+        scanner.delegate = context.coordinator
+        return scanner
+    }
+    
+    func updateUIViewController(_ uiViewController: ScannerViewController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+    
+    class Coordinator: NSObject, ScannerDelegate {
+        var parent: QrCodeScannerView
+        
+        init(parent: QrCodeScannerView) {
+            self.parent = parent
+        }
+        
+        func didScanCode(_ code: String) {
+            parent.onCodeScanned(code)
+        }
+    }
+}
+
+protocol ScannerDelegate: AnyObject {
+    func didScanCode(_ code: String)
+}
+
+class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var captureSession: AVCaptureSession!
+    var previewLayer: AVCaptureVideoPreviewLayer!
+    weak var delegate: ScannerDelegate?
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        view.backgroundColor = UIColor.black
+        captureSession = AVCaptureSession()
+        
+        guard let videoCaptureDevice = AVCaptureDevice.default(for: .video) else { return }
+        let videoInput: AVCaptureDeviceInput
+        
+        do {
+            videoInput = try AVCaptureDeviceInput(device: videoCaptureDevice)
+        } catch {
+            return
+        }
+        
+        if (captureSession.canAddInput(videoInput)) {
+            captureSession.addInput(videoInput)
+        } else {
+            return
+        }
+        
+        let metadataOutput = AVCaptureMetadataOutput()
+        
+        if (captureSession.canAddOutput(metadataOutput)) {
+            captureSession.addOutput(metadataOutput)
+            
+            metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+            metadataOutput.metadataObjectTypes = [.qr]
+        } else {
+            return
+        }
+        
+        previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        previewLayer.frame = view.layer.bounds
+        previewLayer.videoGravity = .resizeAspectFill
+        view.layer.addSublayer(previewLayer)
+        
+        captureSession.startRunning()
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        if (captureSession?.isRunning == true) {
+            captureSession.stopRunning()
+        }
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if let layer = previewLayer {
+            layer.frame = view.bounds
+        }
+    }
+    
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        captureSession.stopRunning()
+        
+        if let metadataObject = metadataObjects.first {
+            guard let readableObject = metadataObject as? AVMetadataMachineReadableCodeObject else { return }
+            guard let stringValue = readableObject.stringValue else { return }
+            AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
+            delegate?.didScanCode(stringValue)
+        }
     }
 }

@@ -93,7 +93,7 @@ struct EmptyStateView: View {
 }
 
 struct ContactRow: View {
-    let contact: ChatViewModel.ContactInfo 
+    let contact: ContactInfo 
     // ContactInfo is from generated code
     
     var body: some View {

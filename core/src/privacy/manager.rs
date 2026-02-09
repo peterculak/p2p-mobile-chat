@@ -31,7 +31,7 @@ impl Default for PrivacyConfig {
         Self {
             onion_routing_enabled: false,
             relay_enabled: true, // All nodes relay by default
-            min_hops: 2, // 2 hops sufficient for POC (Sender -> R1 -> R2 -> Receiver)
+            min_hops: 1, // 1 hop sufficient for initial Onion POC (Sender -> Relay -> Receiver)
             jitter_enabled: true,
         }
     }

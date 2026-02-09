@@ -25,6 +25,10 @@ pub enum MessageType {
     RelayAnnouncement,
     /// Onion routed packet (Sphinx)
     OnionPacket,
+    /// Handshake request (to trigger session establishment)
+    HandshakeRequest,
+    /// Handshake response (contains prekey bundle)
+    HandshakeResponse,
 }
 
 /// Plaintext message content
@@ -97,6 +101,26 @@ impl Message {
             message_type: MessageType::RelayAnnouncement,
             timestamp: now_ms(),
             content: public_key_hex.to_string(),
+        }
+    }
+
+    /// Create a handshake request
+    pub fn handshake_request() -> Self {
+        Self {
+            id: uuid(),
+            message_type: MessageType::HandshakeRequest,
+            timestamp: now_ms(),
+            content: String::new(),
+        }
+    }
+
+    /// Create a handshake response (bundle JSON)
+    pub fn handshake_response(bundle_json: &str) -> Self {
+        Self {
+            id: uuid(),
+            message_type: MessageType::HandshakeResponse,
+            timestamp: now_ms(),
+            content: bundle_json.to_string(),
         }
     }
 

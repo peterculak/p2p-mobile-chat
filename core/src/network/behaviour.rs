@@ -2,6 +2,7 @@
 
 use libp2p::{
     identify, kad, mdns, ping,
+    autonat, relay, dcutr,
     swarm::NetworkBehaviour,
     PeerId,
 };
@@ -27,6 +28,18 @@ pub struct NodeBehaviour {
     
     /// Chat protocol for messaging
     pub chat: ChatBehaviour,
+    
+    /// AutoNAT for NAT traversal detection
+    pub autonat: autonat::Behaviour,
+    
+    /// Relay client for firewalled peers
+    pub relay_client: relay::client::Behaviour,
+    
+    /// Relay server logic (for reachable peers)
+    pub relay_server: relay::Behaviour,
+    
+    /// DCUTR for hole punching
+    pub dcutr: dcutr::Behaviour,
 }
 
 /// Events from our combined behaviour
@@ -37,6 +50,10 @@ pub enum BehaviourEvent {
     Mdns(mdns::Event),
     Kad(kad::Event),
     Chat(ChatEvent),
+    Autonat(autonat::Event),
+    RelayClient(relay::client::Event),
+    RelayServer(relay::Event),
+    Dcutr(dcutr::Event),
 }
 
 impl From<kad::Event> for BehaviourEvent {
@@ -63,23 +80,43 @@ impl From<ping::Event> for BehaviourEvent {
     }
 }
 
-
-
-
-
 impl From<ChatEvent> for BehaviourEvent {
     fn from(event: ChatEvent) -> Self {
         BehaviourEvent::Chat(event)
     }
 }
 
+impl From<autonat::Event> for BehaviourEvent {
+    fn from(event: autonat::Event) -> Self {
+        BehaviourEvent::Autonat(event)
+    }
+}
+
+impl From<relay::client::Event> for BehaviourEvent {
+    fn from(event: relay::client::Event) -> Self {
+        BehaviourEvent::RelayClient(event)
+    }
+}
+
+impl From<relay::Event> for BehaviourEvent {
+    fn from(event: relay::Event) -> Self {
+        BehaviourEvent::RelayServer(event)
+    }
+}
+
+impl From<dcutr::Event> for BehaviourEvent {
+    fn from(event: dcutr::Event) -> Self {
+        BehaviourEvent::Dcutr(event)
+    }
+}
+
 impl NodeBehaviour {
     /// Create a new behaviour with the given peer ID and keypair
-    pub fn new(local_peer_id: PeerId, local_public_key: libp2p::identity::PublicKey) -> Self {
+    pub fn new(local_peer_id: PeerId, local_public_key: libp2p::identity::PublicKey) -> (Self, relay::client::Transport) {
         // Kademlia DHT
         let store = kad::store::MemoryStore::new(local_peer_id);
         let mut kad_config = kad::Config::default();
-        kad_config.set_protocol_names(vec![libp2p::StreamProtocol::new("/securechat/kad/1.0.0")]);
+        kad_config.set_protocol_names(vec![libp2p::StreamProtocol::new("/ipfs/kad/1.0.0")]);
         let kad = kad::Behaviour::with_config(local_peer_id, store, kad_config);
 
         // mDNS for local discovery
@@ -103,12 +140,28 @@ impl NodeBehaviour {
             request_response::Config::default(),
         );
 
-        Self {
+        // AutoNAT
+        let autonat = autonat::Behaviour::new(local_peer_id, autonat::Config::default());
+        
+        // Relay Client
+        let (relay_transport, relay_client) = relay::client::new(local_peer_id);
+        
+        // Relay Server
+        let relay_server = relay::Behaviour::new(local_peer_id, relay::Config::default());
+        
+        // DCUTR
+        let dcutr = dcutr::Behaviour::new(local_peer_id);
+
+        (Self {
             kad,
             mdns,
             identify,
             ping,
             chat,
-        }
+            autonat,
+            relay_client,
+            relay_server,
+            dcutr,
+        }, relay_transport)
     }
 }

@@ -21,7 +21,12 @@ pub use logger::{init_logger, CoreLogger};
 
 // Re-export network API types for UniFFI
 pub use network::{NetworkManager, NetworkError, create_network_manager};
-pub use network::api::{NetworkEvent, PeerInfo};
+pub use network::api::{NetworkEvent, PeerInfo, IdentityDetails, create_configured_network_manager, extract_identity_details};
+
+/// Generate a new identity keypair (protobuf encoded bytes)
+pub fn generate_identity_bytes() -> Vec<u8> {
+    network::api::generate_identity()
+}
 
 // Re-export crypto types
 pub use crypto::{IdentityKeyPair, PreKeyBundle, SignedPreKey, OneTimePreKey};

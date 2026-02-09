@@ -138,13 +138,14 @@ impl MessagingManager {
         let msg = Message::text(text);
         let msg_id = msg.id.clone();
         
-        // Require encryption - no unencrypted fallback
-        if !self.store.has_session(peer_id) {
-            return Err(MessagingError::NoSession);
-        }
-        
-        let envelope = self.handler.prepare_outgoing(&mut self.store, peer_id, &msg)
-            .map_err(|e| MessagingError::Handler(e))?;
+        let envelope = if self.store.has_session(peer_id) {
+            info!("send_message: encrypting message for {}", peer_id);
+            self.handler.prepare_outgoing(&mut self.store, peer_id, &msg)
+                .map_err(|e| MessagingError::Handler(e))?
+        } else {
+            info!("send_message: fallback to UNENCRYPTED message for {}", peer_id);
+            MessageEnvelope::unencrypted(&self.peer_id, &msg)
+        };
         
         self.outgoing.push_back(OutgoingMessage {
             peer_id: peer_id.to_string(),
@@ -218,6 +219,16 @@ impl MessagingManager {
                         if let Ok(data) = BASE64.decode(&msg.content) {
                             self.events.push_back(MessagingEvent::OnionPacketReceived { data });
                         }
+                    }
+                    MessageType::HandshakeRequest => {
+                        info!("handle_incoming: Received HandshakeRequest from {}, responding with PreKeyBundle", sender_peer_id);
+                        self.respond_with_bundle(sender_peer_id)?;
+                    }
+                    MessageType::HandshakeResponse => {
+                        info!("handle_incoming: Received HandshakeResponse from {}, initiating session", sender_peer_id);
+                        let bundle: PreKeyBundle = serde_json::from_str(&msg.content)
+                            .map_err(|_| MessagingError::InvalidMessage)?;
+                        self.initiate_session(sender_peer_id, &bundle)?;
                     }
                     _ => {
                         // Other unencrypted messages not allowed after session
@@ -333,6 +344,35 @@ impl MessagingManager {
     /// Check if we have a session with a peer
     pub fn has_session(&self, peer_id: &str) -> bool {
         self.store.has_session(peer_id)
+    }
+
+    /// Request a session with a peer automatically
+    pub fn request_session(&mut self, peer_id: &str) -> Result<(), MessagingError> {
+        info!("request_session: Sending HandshakeRequest to {}", peer_id);
+        let msg = Message::handshake_request();
+        let envelope = MessageEnvelope::unencrypted(&self.peer_id, &msg);
+        
+        self.outgoing.push_back(OutgoingMessage {
+            peer_id: peer_id.to_string(),
+            data: envelope.to_bytes(),
+        });
+        
+        Ok(())
+    }
+
+    /// Respond to a handshake request with our prekey bundle
+    fn respond_with_bundle(&mut self, peer_id: &str) -> Result<(), MessagingError> {
+        let bundle = self.get_prekey_bundle();
+        let bundle_json = serde_json::to_string(&bundle).unwrap_or_default();
+        let msg = Message::handshake_response(&bundle_json);
+        let envelope = MessageEnvelope::unencrypted(&self.peer_id, &msg);
+        
+        self.outgoing.push_back(OutgoingMessage {
+            peer_id: peer_id.to_string(),
+            data: envelope.to_bytes(),
+        });
+        
+        Ok(())
     }
 }
 

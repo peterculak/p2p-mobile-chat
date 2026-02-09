@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["lib", "staticlib", "cdylib"]
+crate-type = ["lib", "staticlib"]
 name = "securechat_core"
 
 [dependencies]
@@ -42,8 +42,10 @@ libp2p = { version = "0.53", features = [
     "ping",
     "relay",
     "dcutr",
+    "autonat",
     "request-response",
     "macros",
+    "rsa",
 ] }
 
 # Serialization
@@ -76,3 +78,7 @@ path = "src/bin/uniffi-bindgen.rs"
 [[bin]]
 name = "p2p-test"
 path = "src/bin/p2p-test.rs"
+
+[[bin]]
+name = "relay-server"
+path = "src/bin/relay_server.rs"

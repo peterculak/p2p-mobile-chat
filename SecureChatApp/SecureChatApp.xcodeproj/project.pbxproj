@@ -10,24 +10,23 @@
 		A1000001 /* SecureChatApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* SecureChatApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* securechat_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* securechat_core.swift */; };
-		A1000010 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010 /* ChatViewModel.swift */; };
-		A1000011 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* ChatView.swift */; };
 		A1000004 /* libsecurechat_core.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000004 /* libsecurechat_core.a */; };
 		A1000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000005 /* Assets.xcassets */; };
+		A1000010 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010 /* ChatViewModel.swift */; };
+		A1000011 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* ChatView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A2000001 /* SecureChatApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureChatApp.swift; sourceTree = "<group>"; };
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A2000003 /* securechat_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = securechat_core.swift; sourceTree = "<group>"; };
-		A2000010 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
-		A2000011 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
-		A2000004 /* libsecurechat_core.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libsecurechat_core.a; path = ../core/target/aarch64-apple-ios-sim/release/libsecurechat_core.a; sourceTree = "<group>"; };
+		A2000004 /* libsecurechat_core.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libsecurechat_core.a; path = "../core/target/aarch64-apple-ios/debug/libsecurechat_core.a"; sourceTree = "<group>"; };
 		A2000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000006 /* securechat_coreFFI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = securechat_coreFFI.h; sourceTree = "<group>"; };
-		A2000007 /* securechat_coreFFI.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; name = securechat_coreFFI.modulemap; path = ../ios-bindings/securechat_coreFFI.modulemap; sourceTree = "<group>"; };
 		A2000008 /* SecureChatApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SecureChatApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000009 /* BridgingHeader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BridgingHeader.h; sourceTree = "<group>"; };
+		A2000010 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		A2000011 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -46,7 +45,6 @@
 			isa = PBXGroup;
 			children = (
 				A4000002 /* SecureChatApp */,
-				A4000003 /* RustBindings */,
 				A4000004 /* Products */,
 				A4000005 /* Frameworks */,
 			);
@@ -67,7 +65,6 @@
 			path = SecureChatApp;
 			sourceTree = "<group>";
 		};
-
 		A4000004 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -289,11 +286,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
-				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = CN23NNLYL2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SecureChat;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need access to your camera to scan QR codes for adding friends.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -303,18 +301,30 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = (
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../core/target/aarch64-apple-ios/debug",
+					"$(PROJECT_DIR)/../core/target/aarch64-apple-ios/release",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/../core/target/aarch64-apple-ios-sim/debug",
 					"$(PROJECT_DIR)/../core/target/aarch64-apple-ios-sim/release",
 				);
 				MARKETING_VERSION = 1.0;
-				OTHER_LDFLAGS = "-lsecurechat_core";
-				PRODUCT_BUNDLE_IDENTIFIER = com.securechat.app;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lsecurechat_core",
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Security,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.securechat.peter2.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/SecureChatApp";
-				SWIFT_OBJC_BRIDGING_HEADER = "SecureChatApp/BridgingHeader.h";
+				SWIFT_OBJC_BRIDGING_HEADER = SecureChatApp/BridgingHeader.h;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -326,11 +336,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
-				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = CN23NNLYL2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SecureChat;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need access to your camera to scan QR codes for adding friends.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -340,18 +351,30 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				LIBRARY_SEARCH_PATHS = (
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../core/target/aarch64-apple-ios/debug",
+					"$(PROJECT_DIR)/../core/target/aarch64-apple-ios/release",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/../core/target/aarch64-apple-ios-sim/debug",
 					"$(PROJECT_DIR)/../core/target/aarch64-apple-ios-sim/release",
 				);
 				MARKETING_VERSION = 1.0;
-				OTHER_LDFLAGS = "-lsecurechat_core";
-				PRODUCT_BUNDLE_IDENTIFIER = com.securechat.app;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lsecurechat_core",
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Security,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.securechat.peter2.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/SecureChatApp";
-				SWIFT_OBJC_BRIDGING_HEADER = "SecureChatApp/BridgingHeader.h";
+				SWIFT_OBJC_BRIDGING_HEADER = SecureChatApp/BridgingHeader.h;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

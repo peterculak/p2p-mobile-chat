@@ -34,20 +34,6 @@ class ChatViewModel: ObservableObject {
         case failed
     }
     
-    struct ContactInfo: Identifiable, Equatable {
-        let id: String
-        let peerId: String
-        let name: String
-        let sessionEstablished: Bool
-        
-        init(peerId: String, name: String, sessionEstablished: Bool) {
-            self.id = peerId
-            self.peerId = peerId
-            self.name = name
-            self.sessionEstablished = sessionEstablished
-        }
-    }
-    
     func bind(to appViewModel: AppViewModel) {
         self.appViewModel = appViewModel
         
@@ -162,10 +148,7 @@ class ChatViewModel: ObservableObject {
     
     func refreshContacts() {
         guard let messaging = messaging else { return }
-        let coreContacts = messaging.listContacts()
-        self.contacts = coreContacts.map { c in
-            ContactInfo(peerId: c.peerId, name: c.name, sessionEstablished: c.sessionEstablished)
-        }
+        self.contacts = messaging.listContacts()
     }
     
     func sendMessage(to peerId: String, text: String) {
@@ -205,9 +188,10 @@ class ChatViewModel: ObservableObject {
         } catch {
             let errorString = String(describing: error)
             if errorString.contains("NoSession") {
-                print("[SECURITY] No encrypted session with peer - cannot send message")
-                updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
-                addSystemMessage(peerId: peerId, text: "⚠️ No secure session. Add contact with their identity key first.")
+                print("[SECURITY] No encrypted session with peer - requesting handshake")
+                updateMessageStatus(peerId: peerId, messageId: tempId, status: .sending)
+                try? messaging.requestSession(peerId: peerId)
+                addSystemMessage(peerId: peerId, text: "🔒 Securing connection... handshake requested.")
             } else {
                 print("[DEBUG_ERROR] Failed to send message: \(error)")
                 updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
@@ -241,6 +225,11 @@ class ChatViewModel: ObservableObject {
         let keyArray = [UInt8](keyBytes)
         
         messaging.addContact(peerId: peerId, name: name, identityKey: keyArray)
+        
+        // Automatically request session/handshake
+        print("Automatically requesting handshake for \(peerId)")
+        try? messaging.requestSession(peerId: peerId)
+        
         refreshContacts()
     }
     
@@ -312,4 +301,8 @@ extension Data {
         }
         self = data
     }
+}
+
+extension ContactInfo: Identifiable {
+    public var id: String { peerId }
 }

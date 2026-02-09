@@ -5,6 +5,7 @@ use securechat_core::messaging::{MessagingManager, MessagingEvent};
 use securechat_core::privacy::{PrivacyManager, PrivacyConfig, PrivacyEvent};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use libp2p::{identity, PeerId}; // Import identity from libp2p directly
 
 #[tokio::main]
 async fn main() {
@@ -13,10 +14,29 @@ async fn main() {
         .with_env_filter(EnvFilter::new("info"))
         .init();
 
-    println!("=== P2P Test Node (Encrypted + Privacy) ===\n");
+    println!("=== P2P Test Node (Encrypted + Privacy + Persistence) ===\n");
 
-    let config = NetworkConfig::local_only();
-    let mut node = P2PNode::new(config.clone());
+    // Load or generate persistent identity
+    let key_path = "identity.key";
+    let local_key = if std::path::Path::new(key_path).exists() {
+        let bytes = std::fs::read(key_path).expect("Failed to read identity");
+        identity::Keypair::from_protobuf_encoding(&bytes).expect("Failed to parse identity")
+    } else {
+        println!("Generating new identity...");
+        let key = identity::Keypair::generate_ed25519();
+        std::fs::write(key_path, key.to_protobuf_encoding().expect("Failed to encode")).expect("Failed to write identity");
+        key
+    };
+    
+    let local_peer_id = PeerId::from(local_key.public());
+    let persistence_path = format!("peers_{}.json", local_peer_id);
+    println!("Identity: {} (Persisted to {})", local_peer_id, persistence_path);
+
+    let mut config = NetworkConfig::local_only();
+    config.listen_port = 55556;
+    let mut node = P2PNode::new(config.clone())
+        .with_identity(local_key)
+        .with_persistence(persistence_path);
     
     // Create messaging manager
     let mut messaging = MessagingManager::new(&node.peer_id());
@@ -57,6 +77,8 @@ async fn main() {
     println!("Commands:");
     println!("  /session  - Establish encrypted session");
     println!("  /send     - Send encrypted message");
+    println!("  /send     - Send encrypted message");
+    println!("  /dial     - Manually dial a Multiaddr (e.g. /ip4/...)");
     println!("  /relay    - Register a relay node");
     println!("  /onion    - Toggle onion routing");
     println!("  /privacy  - Show privacy status");
@@ -336,6 +358,20 @@ async fn main() {
                             println!("  Packets relayed: {}", relayed);
                             println!("  Packets delivered: {}", delivered);
                             println!("  My relay key: {}", hex::encode(privacy.relay_public_key()));
+                            println!("  My relay key: {}", hex::encode(privacy.relay_public_key()));
+                        } else if cmd.starts_with("/dial ") {
+                            let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
+                            if parts.len() == 2 {
+                                let addr = parts[1];
+                                println!("[DIAL] Attempting to connect to {}", addr);
+                                if let Err(e) = node.dial(addr).await {
+                                    println!("[ERROR] Dial failed: {}", e);
+                                } else {
+                                    println!("[DIAL] Command sent (check for [CONNECTED] event)");
+                                }
+                            } else {
+                                println!("Usage: /dial <multiaddr>");
+                            }
                         } else if cmd.starts_with("/send ") {
                             let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
                             if parts.len() == 3 {
