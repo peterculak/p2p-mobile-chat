@@ -4,9 +4,8 @@
 Cargo.lock
 
 # iOS / Xcode
-*.xcodeproj/project.xcworkspace/xcuserdata/
-*.xcodeproj/xcuserdata/
-*.xcworkspace/xcuserdata/
+**/project.xcworkspace/xcuserdata/
+**/xcuserdata/
 DerivedData/
 *.ipa
 *.dSYM.zip
