@@ -20,6 +20,10 @@ class ChatViewModel: ObservableObject {
     private let pendingLock = NSLock()
     private var pendingNetworkMessages: [(peerId: String, data: Data)] = []
     private var pendingSessionRequests: [String] = []
+    // Tracks peers we've requested a session for but haven't gotten SessionEstablished yet
+    // This survives even after requestSession() succeeds at the API level, because the
+    // actual network send may fail (DialFailure on first scan)
+    private var awaitingSessionPeers: Set<String> = []
     
     // Reference to app model for network status
     var appViewModel: AppViewModel?
@@ -188,6 +192,11 @@ class ChatViewModel: ObservableObject {
             LogManager.shared.info("Messaging: SessionEstablished with \(peerId)", context: "ChatViewModel")
             refreshContacts()
             
+            // Clear from awaiting set — session is fully established
+            pendingLock.lock()
+            awaitingSessionPeers.remove(peerId)
+            pendingLock.unlock()
+            
             // BUG FIX 3: Retry all failed/sending messages for this peer
             retryPendingMessages(for: peerId)
             
@@ -273,25 +282,30 @@ class ChatViewModel: ObservableObject {
             return
         }
         
-        // BUG FIX 2: Remove connectedPeers gate - just try immediately
-        // The network layer will fail if not connected, which is already logged
-        
         guard let messaging = messaging else {
             LogManager.shared.info("TRACE: Messaging API not initialized yet - queuing session request", context: "ChatViewModel")
             pendingLock.lock()
             if !pendingSessionRequests.contains(peerId) {
                 pendingSessionRequests.append(peerId)
             }
+            awaitingSessionPeers.insert(peerId)
             pendingLock.unlock()
             return
         }
+        
+        // Track that we're awaiting a session — even if the API call succeeds,
+        // the actual network send might fail (DialFailure on first scan).
+        // handlePeerConnected will retry if we're still in this set.
+        pendingLock.lock()
+        awaitingSessionPeers.insert(peerId)
+        pendingLock.unlock()
         
         do {
             LogManager.shared.info("TRACE: Handing session request to Rust core for \(peerId)...", context: "ChatViewModel")
             try messaging.requestSession(peerId: peerId)
             LogManager.shared.info("TRACE: Rust core accepted session request for \(peerId)", context: "ChatViewModel")
             
-            // If successful, ensure it's not in pendingSessionRequests anymore
+            // Remove from pendingSessionRequests (but keep in awaitingSessionPeers!)
             pendingLock.lock()
             if let idx = pendingSessionRequests.firstIndex(of: peerId) {
                 pendingSessionRequests.remove(at: idx)
@@ -427,14 +441,15 @@ class ChatViewModel: ObservableObject {
         }
     }
     
-    // BUG FIX 2: Handle peer connected event to retry pending session requests
+    // Handle peer connected event to retry pending/awaiting session requests
     func handlePeerConnected(peerId: String) {
         pendingLock.lock()
         let hasPending = pendingSessionRequests.contains(peerId)
+        let isAwaiting = awaitingSessionPeers.contains(peerId)
         pendingLock.unlock()
         
-        if hasPending {
-            LogManager.shared.info("Peer \(peerId) connected - retrying pending session request", context: "ChatViewModel")
+        if hasPending || isAwaiting {
+            LogManager.shared.info("Peer \(peerId) connected - retrying session request (pending=\(hasPending), awaiting=\(isAwaiting))", context: "ChatViewModel")
             requestSession(peerId: peerId)
         }
     }

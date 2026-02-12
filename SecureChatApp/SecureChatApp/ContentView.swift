@@ -62,6 +62,11 @@ class AppViewModel: ObservableObject {
     
     private var pollTimer: Timer?
     
+    // Network path monitoring for WiFi↔5G transitions
+    private var pathMonitor: NWPathMonitor?
+    private var lastInterfaceType: NWInterface.InterfaceType?
+    private var networkRestartWorkItem: DispatchWorkItem?
+    
     func generateNewIdentity() {
         isGenerating = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
@@ -215,6 +220,7 @@ class AppViewModel: ObservableObject {
             // We'll update the URL once we have a listen address
             
             startPolling()
+            startNetworkMonitor()
         } catch {
             print("Failed to start network: \(error)")
         }
@@ -226,6 +232,8 @@ class AppViewModel: ObservableObject {
         stopPolling()
         discoveredPeers = []
         listeningAddresses = []
+        pathMonitor?.cancel()
+        pathMonitor = nil
     }
     
     func dialManualAddress() {
@@ -276,6 +284,76 @@ class AppViewModel: ObservableObject {
     private func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
+    }
+    
+    // MARK: - Network Path Monitor (WiFi↔5G transition)
+    
+    private func startNetworkMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self else { return }
+            
+            let currentType = path.availableInterfaces.first?.type
+            let typeName: String
+            switch currentType {
+            case .wifi: typeName = "WiFi"
+            case .cellular: typeName = "Cellular"
+            case .wiredEthernet: typeName = "Ethernet"
+            default: typeName = "Other"
+            }
+            
+            if let lastType = self.lastInterfaceType {
+                if lastType != currentType {
+                    LogManager.shared.warn("Network interface changed: \(lastType) → \(typeName). Restarting P2P node...", context: "NetworkMonitor")
+                    self.handleNetworkTransition()
+                }
+            } else {
+                LogManager.shared.info("Network monitor started on \(typeName)", context: "NetworkMonitor")
+            }
+            
+            self.lastInterfaceType = currentType
+        }
+        monitor.start(queue: DispatchQueue(label: "com.securechat.networkmonitor"))
+        self.pathMonitor = monitor
+    }
+    
+    private func handleNetworkTransition() {
+        // Cancel any pending restart to debounce rapid changes
+        networkRestartWorkItem?.cancel()
+        
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            LogManager.shared.info("Executing network restart after interface change...", context: "NetworkMonitor")
+            
+            // Stop the old node and clear state
+            // We do the UI updates on main thread ASYNCHRONOUSLY to avoid deadlocks
+            DispatchQueue.main.async {
+                self.isNetworkRunning = false
+                self.connectedPeers.removeAll()
+                self.listeningAddresses.removeAll()
+            }
+            
+            // Perform the stop operation on the background thread (it blocks internally)
+            self.networkManager?.stop()
+            
+            // Brief pause to let OS settle the new interface
+            Thread.sleep(forTimeInterval: 1.0)
+            
+            // Restart on background thread
+            do {
+                try self.networkManager?.start()
+                DispatchQueue.main.async {
+                    self.isNetworkRunning = true
+                }
+                LogManager.shared.info("P2P node restarted after network transition", context: "NetworkMonitor")
+            } catch {
+                LogManager.shared.error("Failed to restart P2P node after transition: \(error)", context: "NetworkMonitor")
+            }
+        }
+        
+        networkRestartWorkItem = workItem
+        // Debounce: wait 2 seconds before actually restarting
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2.0, execute: workItem)
     }
     
     private func pollEvents() {
