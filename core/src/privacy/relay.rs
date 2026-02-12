@@ -4,7 +4,7 @@
 
 use crate::privacy::sphinx_wrapper::{process_onion_packet, ProcessResult, generate_relay_keypair};
 use std::collections::VecDeque;
-use tracing::{info, debug, warn};
+use tracing::info;
 
 /// A packet that needs to be forwarded
 #[derive(Debug, Clone)]

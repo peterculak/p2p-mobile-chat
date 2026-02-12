@@ -194,12 +194,21 @@ impl NetworkManager {
         // Deserialize envelope
         let envelope = crate::messaging::MessageEnvelope::from_bytes(&data)
             .map_err(|_| NetworkError::GenericError)?;
+        tracing::info!(
+            "NetworkManager::send_message -> {} (encrypted={}, payload_len={})",
+            peer_id,
+            envelope.encrypted,
+            envelope.payload.len()
+        );
             
         let mut node = self.node.lock().unwrap();
         
         self.runtime.block_on(async {
-            node.send_message(peer_id, envelope).await
-        }).map_err(|_| NetworkError::ConnectionFailed)
+            node.send_message(peer_id.clone(), envelope).await
+        }).map_err(|e| {
+            tracing::error!("NetworkManager::send_message error for {}: {}", peer_id, e);
+            NetworkError::ConnectionFailed
+        })
     }
 }
 

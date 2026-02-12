@@ -3,6 +3,7 @@ import CoreData
 import os
 import CoreImage.CIFilterBuiltins
 import AVFoundation
+import Network
 
 // MARK: - Color Theme
 extension Color {
@@ -35,6 +36,7 @@ class AppViewModel: ObservableObject {
     @Published var discoveredPeers: [PeerInfo] = []
     @Published var connectedPeers: Set<String> = []
     @Published var listeningAddresses: [String] = []
+    @Published var logServerURL: String?
     
     var listeningAddress: String {
         // 1. Prefer relay addresses (bridge)
@@ -56,6 +58,7 @@ class AppViewModel: ObservableObject {
     
     // Callbacks
     var onMessageReceived: ((String, Data) -> Void)?
+    var onPeerConnected: ((String) -> Void)?
     
     private var pollTimer: Timer?
     
@@ -63,7 +66,7 @@ class AppViewModel: ObservableObject {
         isGenerating = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             // Use generateIdentityBytes which returns [UInt8]
-            let keyBytes = generateIdentityBytes()
+            let _ = generateIdentityBytes()
             // Convert to Identity struct if needed, or just use bytes for now?
             // The UI expects `identity: Identity?`. 
             // `Identity` struct in UDL/Swift has hex strings.
@@ -88,7 +91,7 @@ class AppViewModel: ObservableObject {
             // helper: `extract_identity_details` returns details.
             
             // I'll use generateIdentityBytes() as source of truth.
-            let bytes = generateIdentityBytes()
+            let _ = generateIdentityBytes()
             // Saving/Loading logic uses bytes.
             // UI needs Identity struct?
             // Identity struct definition:
@@ -185,6 +188,7 @@ class AppViewModel: ObservableObject {
             LogManager.shared.info("App Startup - PeerID: \(peerId), IdentityKey: \(identityKeyHex)", context: "AppViewModel")
             
             privacyManager = createPrivacyManager()
+            privacyManager?.setOnionEnabled(enabled: isOnionEnabled)
             
             // Populate Identity model for UI
             if !peerId.isEmpty {
@@ -205,6 +209,11 @@ class AppViewModel: ObservableObject {
         do {
             try networkManager?.start()
             isNetworkRunning = true
+            
+            // Start Log server for desktop debugging
+            LogServer.shared.start()
+            // We'll update the URL once we have a listen address
+            
             startPolling()
         } catch {
             print("Failed to start network: \(error)")
@@ -302,6 +311,16 @@ class AppViewModel: ObservableObject {
             LogManager.shared.info("Network listening on \(address)", context: "AppViewModel")
             if !listeningAddresses.contains(address) {
                 listeningAddresses.append(address)
+                // If it's a local IP, update Log Server URL hint
+                if address.contains("ip4") && !address.contains("127.0.0.1") && !address.contains("p2p-circuit") {
+                    let parts = address.components(separatedBy: "/")
+                    // Multiaddr format: /ip4/192.168.1.10/tcp/1234
+                    if parts.count >= 3 && parts[1] == "ip4" {
+                        let ip = parts[2]
+                        self.logServerURL = "http://\(ip):8080/logs"
+                        LogManager.shared.info("Log Server accessible at: \(self.logServerURL ?? "")", context: "AppViewModel")
+                    }
+                }
             }
         case .peerDiscovered(let peer):
             LogManager.shared.info("Discovered peer: \(peer.peerId)", context: "AppViewModel")
@@ -328,10 +347,12 @@ class AppViewModel: ObservableObject {
         case .peerConnected(let peerId):
             LogManager.shared.info("Peer connected: \(peerId)", context: "AppViewModel")
             connectedPeers.insert(peerId)
+            // BUG FIX 2: Notify ChatViewModel to retry pending session requests
+            onPeerConnected?(peerId)
         case .error(let message):
             LogManager.shared.error("Network error: \(message)", context: "AppViewModel")
         case .messageReceived(let peerId, let data):
-            LogManager.shared.debug("Network received message from \(peerId), size: \(data.count)", context: "AppViewModel")
+            LogManager.shared.info("Network received message from \(peerId), size: \(data.count)", context: "AppViewModel")
             onMessageReceived?(peerId, Data(data))
         }
     }
@@ -340,6 +361,7 @@ class AppViewModel: ObservableObject {
         switch event {
         case .relayPacket(let nextPeerId, let packetBytes, let delayMs):
             LogManager.shared.info("Privacy: Relaying packet to \(nextPeerId) after \(delayMs)ms", context: "AppViewModel")
+            LogManager.shared.info("Privacy: Relay packet size \(packetBytes.count)", context: "AppViewModel")
             // For now we send immediately, ignoring delay for simplicity in this demo
             // In a real app we'd use DispatchQueue.main.asyncAfter
             do {
@@ -350,6 +372,7 @@ class AppViewModel: ObservableObject {
             
         case .deliverPayload(let nextPeerId, let payload):
             LogManager.shared.info("Privacy: Delivering exit payload to \(nextPeerId)", context: "AppViewModel")
+            LogManager.shared.info("Privacy: Exit payload size \(payload.count)", context: "AppViewModel")
             do {
                 try networkManager?.sendMessage(peerId: nextPeerId, data: payload)
             } catch {
@@ -358,6 +381,7 @@ class AppViewModel: ObservableObject {
             
         case .packetDelivered(let payload):
             LogManager.shared.info("Privacy: Packet reached destination (us!), passing to messaging", context: "AppViewModel")
+            LogManager.shared.info("Privacy: PacketDelivered payload size \(payload.count)", context: "AppViewModel")
             onMessageReceived?("privacy-exit", Data(payload))
             
         case .circuitBuilt(let circuitId, let hops):
@@ -376,6 +400,7 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var showScanner = false
     @State private var showInvitation = false
+    @State private var showDebugLogs = false
     
     var body: some View {
         ZStack {
@@ -395,7 +420,7 @@ struct ContentView: View {
                     }
                     .tag(0)
                 
-                NetworkTab(viewModel: viewModel)
+                NetworkTab(viewModel: viewModel, chatViewModel: chatViewModel)
                     .tabItem {
                         Image(systemName: "network")
                         Text("Network")
@@ -419,16 +444,78 @@ struct ContentView: View {
                     .tag(3)
             }
             .accentColor(.accentEnd)
+            
+            // Floating debug log toggle
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button(action: { showDebugLogs.toggle() }) {
+                        Text(showDebugLogs ? "Hide Logs" : "Show Logs")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.5))
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 24)
+                }
+            }
+            
+            if showDebugLogs {
+                DebugLogPanel()
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .sheet(isPresented: $showInvitation) {
+            InvitationView(
+                peerId: viewModel.peerId,
+                addresses: inviteAddresses(peerId: viewModel.peerId, listening: viewModel.listeningAddresses)
+            )
         }
         .onAppear {
             chatViewModel.bind(to: viewModel)
             viewModel.onMessageReceived = { peerId, data in
                 chatViewModel.ingestNetworkMessage(peerId: peerId, data: data)
             }
+            viewModel.onPeerConnected = { peerId in
+                chatViewModel.handlePeerConnected(peerId: peerId)
+            }
             // Auto-start network on launch
             viewModel.startNetwork()
         }
     }
+}
+
+private func prioritizedAddresses(from addresses: [String]) -> [String] {
+    if addresses.isEmpty { return [] }
+    return addresses.sorted { lhs, rhs in
+        let lhsRelay = lhs.contains("p2p-circuit")
+        let rhsRelay = rhs.contains("p2p-circuit")
+        if lhsRelay != rhsRelay { return lhsRelay }
+        let lhsLoopback = lhs.contains("127.0.0.1") || lhs.contains("::1") || lhs.contains("/localhost/")
+        let rhsLoopback = rhs.contains("127.0.0.1") || rhs.contains("::1") || rhs.contains("/localhost/")
+        if lhsLoopback != rhsLoopback { return !lhsLoopback }
+        return lhs < rhs
+    }
+}
+
+private func inviteAddresses(peerId: String, listening: [String]) -> [String] {
+    let ordered = prioritizedAddresses(from: listening)
+    let relayAddrs = ordered.filter { $0.contains("p2p-circuit") }
+    return relayAddrs.map { ensureRelayDialAddress($0, peerId: peerId) }
+}
+
+private func ensureRelayDialAddress(_ address: String, peerId: String) -> String {
+    if address.contains("/p2p-circuit/p2p/") {
+        return address
+    }
+    if address.contains("p2p-circuit") {
+        return address + "/p2p/\(peerId)"
+    }
+    return address
 }
 
 // MARK: - Identity Tab
@@ -563,6 +650,7 @@ struct IdentityTab: View {
 // MARK: - Network Tab
 struct NetworkTab: View {
     @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var chatViewModel: ChatViewModel
     @State private var showScanner = false
     
     var body: some View {
@@ -745,8 +833,7 @@ struct NetworkTab: View {
             }
             .padding(.horizontal, 24)
             .sheet(isPresented: $showScanner) {
-                // ScannerView(viewModel: viewModel)
-                ScannerView(viewModel: viewModel)
+                ScannerView(viewModel: viewModel, chatViewModel: chatViewModel)
             }
             
             Spacer()
@@ -973,14 +1060,39 @@ struct SettingsView: View {
                         Text("Active Relays")
                         Spacer()
                         Text("\(appViewModel.relayCount)")
-                            .foregroundColor(appViewModel.relayCount >= 3 ? .green : .orange)
+                            .foregroundColor(appViewModel.relayCount >= 1 ? .green : .orange)
                     }
                     
-                    if appViewModel.relayCount < 3 {
-                        Text("At least 3 relays are required for onion routing circuits.")
+                    if appViewModel.relayCount < 1 {
+                        Text("At least 1 relay is required for onion routing circuits.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                }
+                
+                Section("Debugging") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Log Server URL")
+                            .font(.caption.bold())
+                        
+                        if let url = appViewModel.logServerURL {
+                            Text(url)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundColor(.accentEnd)
+                            
+                            Button(action: { UIPasteboard.general.string = url }) {
+                                Label("Copy Log URL", systemImage: "doc.on.doc")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.accentEnd)
+                        } else {
+                            Text("Waiting for network...")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
             }
             .navigationTitle("Identity")
@@ -1023,6 +1135,7 @@ class LogManager: CoreLogger {
     func log(level: String, message: String) {
         guard isDebugEnabled else { return }
         
+        DebugLogStore.shared.add("[RUST] \(level.uppercased()): \(message)")
         switch level.lowercased() {
         case "error":
             osLogger.error("🔴 [RUST] \(message, privacy: .public)")
@@ -1041,16 +1154,25 @@ class LogManager: CoreLogger {
     func debug(_ message: String, context: String = "") {
         guard isDebugEnabled else { return }
         let ctx = context.isEmpty ? "" : "[\(context)] "
+        DebugLogStore.shared.add("\(ctx)\(message)")
         swiftLogger.debug("\(ctx)\(message, privacy: .public)")
     }
     
     func info(_ message: String, context: String = "") {
         let ctx = context.isEmpty ? "" : "[\(context)] "
+        DebugLogStore.shared.add("\(ctx)\(message)")
         swiftLogger.info("\(ctx)\(message, privacy: .public)")
+    }
+    
+    func warn(_ message: String, context: String = "") {
+        let ctx = context.isEmpty ? "" : "[\(context)] "
+        DebugLogStore.shared.add("WARN \(ctx)\(message)")
+        swiftLogger.warning("\(ctx)\(message, privacy: .public)")
     }
     
     func error(_ message: String, context: String = "") {
         let ctx = context.isEmpty ? "" : "[\(context)] "
+        DebugLogStore.shared.add("ERROR \(ctx)\(message)")
         swiftLogger.error("🔴 \(ctx)\(message, privacy: .public)")
     }
     
@@ -1061,21 +1183,147 @@ class LogManager: CoreLogger {
         // Call the Rust init_logger function, passing self as the callback
         initLogger(callback: self)
         swiftLogger.info("Rust Logger initialization called.")
+        DebugLogStore.shared.add("Logger initialized")
     }
     }
+
+final class DebugLogStore: ObservableObject {
+    static let shared = DebugLogStore()
+    @Published var lines: [String] = []
+    
+    func add(_ line: String) {
+        DispatchQueue.main.async {
+            self.lines.append(line)
+            if self.lines.count > 200 {
+                self.lines.removeFirst(self.lines.count - 200)
+            }
+        }
+    }
+    
+    var joined: String {
+        lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - Log Server
+/// Minimal HTTP server to serve app logs over the network
+class LogServer {
+    static let shared = LogServer()
+    private var listener: NWListener?
+    private var port: NWEndpoint.Port = 8080
+    
+    func start() {
+        guard listener == nil else { return }
+        do {
+            listener = try NWListener(using: .tcp, on: port)
+            
+            listener?.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    print("Log Server ready on port 8080")
+                case .failed(let error):
+                    print("Log Server failed: \(error)")
+                default:
+                    break
+                }
+            }
+            
+            listener?.newConnectionHandler = { connection in
+                self.handleConnection(connection)
+            }
+            
+            listener?.start(queue: .main)
+        } catch {
+            print("Failed to start Log Server: \(error)")
+        }
+    }
+    
+    private func handleConnection(_ connection: NWConnection) {
+        connection.stateUpdateHandler = { state in
+            if case .ready = state {
+                self.receiveRequest(connection)
+            }
+        }
+        connection.start(queue: .main)
+    }
+    
+    private func receiveRequest(_ connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { data, _, isComplete, error in
+            if let data = data, !data.isEmpty {
+                self.sendResponse(connection)
+            } else if error != nil {
+                connection.cancel()
+            }
+        }
+    }
+    
+    private func sendResponse(_ connection: NWConnection) {
+        let logs = DebugLogStore.shared.joined
+        let response = """
+HTTP/1.1 200 OK
+Content-Type: text/plain; charset=utf-8
+Content-Length: \(logs.utf8.count)
+Connection: close
+Access-Control-Allow-Origin: *
+
+\(logs)
+"""
+        
+        connection.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+}
+
+struct DebugLogPanel: View {
+    @ObservedObject private var store = DebugLogStore.shared
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("Debug Logs")
+                    .font(.caption.bold())
+                    .foregroundColor(.white)
+                Spacer()
+                Button("Copy") {
+                    UIPasteboard.general.string = store.joined
+                }
+                .font(.caption)
+                .foregroundColor(.accentEnd)
+            }
+            
+            ScrollView {
+                Text(store.joined)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(maxHeight: 260)
+        }
+        .padding(12)
+        .background(Color.black.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 80)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+}
 
 // MARK: - Invitation View
 struct InvitationView: View {
     let peerId: String
     let addresses: [String]
     
+    private var relayAddress: String? {
+        addresses.first(where: { $0.contains("p2p-circuit") })
+    }
+    
     var connectionString: String {
-        // Format: securechat://invite/PEER_ID/MULTIADDR_BASE64
-        // For now, let's just use the first valid public address or local one
-        if let addr = addresses.first(where: { !$0.contains("127.0.0.1") }) ?? addresses.first {
-             return "securechat://invite/\(peerId)/\(addr)"
+        if let addr = relayAddress {
+            return "securechat://invite/\(peerId)/\(addr)"
         }
-        return "securechat://invite/\(peerId)/unknown"
+        return "securechat://invite/\(peerId)/pending"
     }
     
     let context = CIContext()
@@ -1094,21 +1342,29 @@ struct InvitationView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
             
+            if relayAddress == nil {
+                Text("Waiting for relay reservation… keep the app open and connected.")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+            
             ZStack {
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color.white)
                     .frame(width: 250, height: 250)
                 
-                if let qrImage = generateQRCode(from: connectionString) {
+                if relayAddress != nil, let qrImage = generateQRCode(from: connectionString) {
                     Image(uiImage: qrImage)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
                         .frame(width: 230, height: 230)
                 } else {
-                    Image(systemName: "xmark.circle")
+                    Image(systemName: "hourglass")
                         .font(.largeTitle)
-                        .foregroundColor(.red)
+                        .foregroundColor(.gray)
                 }
             }
             .shadow(color: .accentStart.opacity(0.5), radius: 20, x: 0, y: 0)
@@ -1152,6 +1408,7 @@ struct InvitationView: View {
 // MARK: - Scanner View
 struct ScannerView: View {
     @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var chatViewModel: ChatViewModel
     @Environment(\.presentationMode) var presentationMode
     
     var body: some View {
@@ -1193,15 +1450,33 @@ struct ScannerView: View {
                 
                 LogManager.shared.info("Scanned Invite: \(peerId) at \(address)", context: "ScannerView")
                 
-                // Trigger dial
+                // Ensure UI updates happen on Main Thread
                 DispatchQueue.main.async {
-                    do {
-                        try viewModel.networkManager?.dial(address: address)
-                        let generator = UINotificationFeedbackGenerator()
-                        generator.notificationOccurred(.success)
-                        self.presentationMode.wrappedValue.dismiss()
-                    } catch {
-                        LogManager.shared.error("Failed to dial scanned address: \(error)", context: "ScannerView")
+                    LogManager.shared.info("TRACE: Dismissing Scanner on Main Thread", context: "ScannerView")
+                    
+                    // Haptic feedback
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+                    
+                    // Dismiss view
+                    self.presentationMode.wrappedValue.dismiss()
+                    
+                    // Trigger networking in background AFTER UI update is scheduled
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        LogManager.shared.info("TRACE: Background Dial Initiated for \(address)", context: "ScannerView")
+                        do {
+                            // Dial - this blocks, so MUST be in background
+                            try self.viewModel.networkManager?.dial(address: address)
+                            LogManager.shared.info("Dial succeeded for \(address)", context: "ScannerView")
+                        } catch {
+                            LogManager.shared.error("Failed to dial scanned address: \(error)", context: "ScannerView")
+                        }
+                        
+                        // Queue the session request back on Main Thread
+                        DispatchQueue.main.async {
+                            LogManager.shared.info("TRACE: Triggering requestSession for \(peerId)", context: "ScannerView")
+                            self.chatViewModel.requestSession(peerId: peerId)
+                        }
                     }
                 }
             }

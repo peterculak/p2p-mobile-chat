@@ -7,7 +7,7 @@ use crate::messaging::contact::{Contact, ContactStore};
 use crate::messaging::handler::{MessageHandler, HandlerError};
 use crate::crypto::keys::PreKeyBundle;
 use crate::crypto::session::{InitialMessage, SessionError};
-use tracing::info;
+use tracing::{info, error};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 /// Events from the messaging system
@@ -135,22 +135,32 @@ impl MessagingManager {
 
     /// Send a text message to a peer
     pub fn send_message(&mut self, peer_id: &str, text: &str) -> Result<String, MessagingError> {
+        // CRITICAL: Check for session FIRST and return error if none exists
+        if !self.store.has_session(peer_id) {
+            info!("send_message: no session for {}, returning NoSession error", peer_id);
+            return Err(MessagingError::NoSession);
+        }
+        
         let msg = Message::text(text);
         let msg_id = msg.id.clone();
         
-        let envelope = if self.store.has_session(peer_id) {
-            info!("send_message: encrypting message for {}", peer_id);
-            self.handler.prepare_outgoing(&mut self.store, peer_id, &msg)
-                .map_err(|e| MessagingError::Handler(e))?
-        } else {
-            info!("send_message: fallback to UNENCRYPTED message for {}", peer_id);
-            MessageEnvelope::unencrypted(&self.peer_id, &msg)
+        info!("send_message: encrypting message for {}", peer_id);
+        let envelope = match self.handler.prepare_outgoing(&mut self.store, peer_id, &msg) {
+            Ok(env) => env,
+            Err(e) => {
+                error!("send_message: prepare_outgoing FAILED for {}: {:?}", peer_id, e);
+                return Err(MessagingError::Handler(e));
+            }
         };
         
         self.outgoing.push_back(OutgoingMessage {
             peer_id: peer_id.to_string(),
             data: envelope.to_bytes(),
         });
+        info!(
+            "send_message: queued outgoing message {} to {} (encrypted={})",
+            msg_id, peer_id, envelope.encrypted
+        );
 
         self.events.push_back(MessagingEvent::MessageSent {
             to_peer_id: peer_id.to_string(),
@@ -176,6 +186,7 @@ impl MessagingManager {
         
         let envelope = self.handler.prepare_outgoing(&mut self.store, peer_id, &msg)
             .map_err(|e| MessagingError::Handler(e))?;
+        info!("prepare_encrypted_message: prepared encrypted message {} to {}", msg_id, peer_id);
             
         Ok((msg_id, envelope.to_bytes()))
     }
@@ -216,7 +227,9 @@ impl MessagingManager {
                         });
                     }
                     MessageType::OnionPacket => {
+                        info!("handle_incoming: Received OnionPacket from {}", sender_peer_id);
                         if let Ok(data) = BASE64.decode(&msg.content) {
+                            info!("handle_incoming: OnionPacket decoded size={}", data.len());
                             self.events.push_back(MessagingEvent::OnionPacketReceived { data });
                         }
                     }
@@ -228,6 +241,15 @@ impl MessagingManager {
                         info!("handle_incoming: Received HandshakeResponse from {}, initiating session", sender_peer_id);
                         let bundle: PreKeyBundle = serde_json::from_str(&msg.content)
                             .map_err(|_| MessagingError::InvalidMessage)?;
+                        if self.store.get_contact(sender_peer_id).is_none() {
+                            let identity_key = bundle.identity_key.to_bytes();
+                            self.store.add_contact(Contact::new(
+                                sender_peer_id,
+                                sender_peer_id,
+                                identity_key,
+                            ));
+                        }
+                        info!("handle_incoming: HandshakeResponse bundle parsed, starting session init for {}", sender_peer_id);
                         self.initiate_session(sender_peer_id, &bundle)?;
                     }
                     _ => {
@@ -333,7 +355,11 @@ impl MessagingManager {
 
     /// Get next outgoing message to send over network
     pub fn next_outgoing(&mut self) -> Option<OutgoingMessage> {
-        self.outgoing.pop_front()
+        let msg = self.outgoing.pop_front();
+        if let Some(ref out) = msg {
+            info!("next_outgoing: dequeued message for {} ({} bytes)", out.peer_id, out.data.len());
+        }
+        msg
     }
 
     /// Get next event
@@ -356,6 +382,7 @@ impl MessagingManager {
             peer_id: peer_id.to_string(),
             data: envelope.to_bytes(),
         });
+        info!("request_session: queued HandshakeRequest to {}", peer_id);
         
         Ok(())
     }
@@ -371,6 +398,7 @@ impl MessagingManager {
             peer_id: peer_id.to_string(),
             data: envelope.to_bytes(),
         });
+        info!("respond_with_bundle: queued HandshakeResponse to {}", peer_id);
         
         Ok(())
     }

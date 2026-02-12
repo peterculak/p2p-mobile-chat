@@ -114,7 +114,11 @@ impl MessagingAPI {
 
     pub fn send_message(&self, peer_id: String, text: String) -> Result<String, String> {
         self.manager.lock().unwrap().send_message(&peer_id, &text)
-            .map_err(|e| e.to_string())
+            .map_err(|e| {
+                let err_str = e.to_string();
+                tracing::error!("MessagingAPI::send_message FAILED: {}", err_str);
+                err_str
+            })
     }
 
     pub fn request_session(&self, peer_id: String) -> Result<(), String> {

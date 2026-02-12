@@ -8,7 +8,7 @@ use std::time::Duration;
 
 /// Fixed packet size for traffic analysis resistance
 /// Fixed packet size for traffic analysis resistance
-pub const FIXED_PACKET_SIZE: usize = 8192;
+pub const FIXED_PACKET_SIZE: usize = 8540;
 
 /// Minimum jitter delay in milliseconds
 pub const MIN_JITTER_MS: u64 = 50;

@@ -29,8 +29,8 @@ pub struct NodeBehaviour {
     /// Chat protocol for messaging
     pub chat: ChatBehaviour,
     
-    /// AutoNAT for NAT traversal detection
-    pub autonat: autonat::Behaviour,
+    // /// AutoNAT for NAT traversal detection
+    // pub autonat: autonat::Behaviour,
     
     /// Relay client for firewalled peers
     pub relay_client: relay::client::Behaviour,
@@ -38,8 +38,8 @@ pub struct NodeBehaviour {
     /// Relay server logic (for reachable peers)
     pub relay_server: relay::Behaviour,
     
-    /// DCUTR for hole punching
-    pub dcutr: dcutr::Behaviour,
+    // /// DCUTR for hole punching
+    // pub dcutr: dcutr::Behaviour,
 }
 
 /// Events from our combined behaviour
@@ -50,10 +50,10 @@ pub enum BehaviourEvent {
     Mdns(mdns::Event),
     Kad(kad::Event),
     Chat(ChatEvent),
-    Autonat(autonat::Event),
+    // Autonat(autonat::Event),
     RelayClient(relay::client::Event),
     RelayServer(relay::Event),
-    Dcutr(dcutr::Event),
+    // Dcutr(dcutr::Event),
 }
 
 impl From<kad::Event> for BehaviourEvent {
@@ -86,11 +86,13 @@ impl From<ChatEvent> for BehaviourEvent {
     }
 }
 
+/*
 impl From<autonat::Event> for BehaviourEvent {
     fn from(event: autonat::Event) -> Self {
         BehaviourEvent::Autonat(event)
     }
 }
+*/
 
 impl From<relay::client::Event> for BehaviourEvent {
     fn from(event: relay::client::Event) -> Self {
@@ -104,11 +106,13 @@ impl From<relay::Event> for BehaviourEvent {
     }
 }
 
+/*
 impl From<dcutr::Event> for BehaviourEvent {
     fn from(event: dcutr::Event) -> Self {
         BehaviourEvent::Dcutr(event)
     }
 }
+*/
 
 impl NodeBehaviour {
     /// Create a new behaviour with the given peer ID and keypair
@@ -141,7 +145,7 @@ impl NodeBehaviour {
         );
 
         // AutoNAT
-        let autonat = autonat::Behaviour::new(local_peer_id, autonat::Config::default());
+        // let autonat = autonat::Behaviour::new(local_peer_id, autonat::Config::default());
         
         // Relay Client
         let (relay_transport, relay_client) = relay::client::new(local_peer_id);
@@ -150,7 +154,7 @@ impl NodeBehaviour {
         let relay_server = relay::Behaviour::new(local_peer_id, relay::Config::default());
         
         // DCUTR
-        let dcutr = dcutr::Behaviour::new(local_peer_id);
+        // let dcutr = dcutr::Behaviour::new(local_peer_id);
 
         (Self {
             kad,
@@ -158,10 +162,10 @@ impl NodeBehaviour {
             identify,
             ping,
             chat,
-            autonat,
+            // autonat,
             relay_client,
             relay_server,
-            dcutr,
+            // dcutr,
         }, relay_transport)
     }
 }

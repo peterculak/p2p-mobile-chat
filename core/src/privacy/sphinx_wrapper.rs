@@ -6,6 +6,9 @@ use sphinx_packet::{
     SphinxPacket,
     route::{Node, NodeAddressBytes, Destination, DestinationAddressBytes},
     header::delays::Delay,
+    packet::builder::SphinxPacketBuilder,
+    header::HEADER_SIZE,
+    payload::PAYLOAD_OVERHEAD_SIZE,
     crypto::PublicKey as SphinxPublicKey,
 };
 use x25519_dalek::{StaticSecret, PublicKey};
@@ -13,20 +16,21 @@ use rand::rngs::OsRng;
 use thiserror::Error;
 use tracing::info;
 
-/// Fixed payload size for traffic analysis resistance
-/// Note: Standard sphinx-packet 0.6 uses 1024 byte payload by default
-pub const PAYLOAD_SIZE: usize = 1024;
+/// Fixed packet size for traffic analysis resistance
+/// Must match obfuscation::FIXED_PACKET_SIZE
+pub const SPHINX_PACKET_SIZE: usize = crate::privacy::obfuscation::FIXED_PACKET_SIZE;
 
-/// Canonical Sphinx packet size for the configured PAYLOAD_SIZE
-/// Determined by running tests: 1372 bytes
-pub const SPHINX_PACKET_SIZE: usize = 1372;
+/// Maximum plaintext size that fits into the fixed packet size.
+/// We reserve 4 bytes for our length prefix.
+pub const MAX_PLAINTEXT_SIZE: usize =
+    SPHINX_PACKET_SIZE - HEADER_SIZE - PAYLOAD_OVERHEAD_SIZE - 4;
 
 /// Maximum address size for routing (32 bytes for peer ID)
 /// Note: We must use the raw 32-byte Ed25519 public key, not the full string
 pub const ADDRESS_SIZE: usize = 32;
 
 /// Number of hops in a circuit
-pub const NUM_HOPS: usize = 3;
+pub const NUM_HOPS: usize = 1;
 
 // Helper to get raw 32-byte pubkey from PeerId string
 pub fn peer_id_to_bytes(peer_id_str: &str) -> Option<Vec<u8>> {
@@ -183,10 +187,10 @@ pub fn create_onion_packet(
     route: &[RelayNode],
     destination: &OnionDestination,
 ) -> Result<Vec<u8>, SphinxError> {
-    if payload.len() > PAYLOAD_SIZE {
+    if payload.len() > MAX_PLAINTEXT_SIZE {
         return Err(SphinxError::PayloadTooLarge {
             size: payload.len(),
-            max: PAYLOAD_SIZE,
+            max: MAX_PLAINTEXT_SIZE,
         });
     }
     
@@ -205,9 +209,12 @@ pub fn create_onion_packet(
     message.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     message.extend_from_slice(payload);
     
-    // Build the packet using default payload size
+    // Build the packet using a payload size that yields a fixed packet size
+    let payload_size = SPHINX_PACKET_SIZE - HEADER_SIZE;
     let sphinx_dest = destination.to_sphinx_destination();
-    let packet = SphinxPacket::new(message, &sphinx_nodes, &sphinx_dest, &delays)
+    let packet = SphinxPacketBuilder::new()
+        .with_payload_size(payload_size)
+        .build_packet(message, &sphinx_nodes, &sphinx_dest, &delays)
         .map_err(|e| SphinxError::PacketCreation(e.to_string()))?;
     
     Ok(packet.to_bytes())

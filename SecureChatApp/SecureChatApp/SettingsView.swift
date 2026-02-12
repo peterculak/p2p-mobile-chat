@@ -39,14 +39,36 @@ struct SettingsView: View {
                     HStack {
                         Text("Status")
                         Spacer()
-                        Text(appViewModel.isRunning ? "Connected" : "Disconnected")
-                            .foregroundColor(appViewModel.isRunning ? .green : .red)
+                        Text(appViewModel.isNetworkRunning ? "Connected" : "Disconnected")
+                            .foregroundColor(appViewModel.isNetworkRunning ? .green : .red)
                     }
                     
                     HStack {
                         Text("Discovered Peers")
                         Spacer()
-                        Text("\(appViewModel.peers.count)")
+                        Text("\(appViewModel.discoveredPeers.count)")
+                    }
+                }
+                
+                if let logURL = appViewModel.logServerURL {
+                    Section("Debugging") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Remote Log Access")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("Open this URL on your computer:")
+                                .font(.caption2)
+                            Text(logURL)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.accentEnd)
+                                .textSelection(.enabled)
+                            
+                            Button("Copy Log URL") {
+                                UIPasteboard.general.string = logURL
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.vertical, 4)
                     }
                 }
             }

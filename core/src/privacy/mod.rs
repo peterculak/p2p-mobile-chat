@@ -16,7 +16,7 @@ pub mod manager;
 pub use sphinx_wrapper::{
     create_onion_packet, process_onion_packet, 
     ProcessResult, SphinxError, RelayNode, OnionDestination,
-    generate_relay_keypair, PAYLOAD_SIZE, NUM_HOPS,
+    generate_relay_keypair, MAX_PLAINTEXT_SIZE, NUM_HOPS,
 };
 pub use circuit::{Circuit, CircuitBuilder, CircuitError, RelayRegistry};
 pub use obfuscation::{

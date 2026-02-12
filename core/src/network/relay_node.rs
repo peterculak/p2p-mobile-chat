@@ -7,6 +7,8 @@ use libp2p::{
     kad,
     request_response::{self, ProtocolSupport},
     PeerId,
+    multiaddr::Protocol,
+    Multiaddr,
 };
 use tracing::{info, warn, error, debug};
 use base64::Engine;
@@ -86,10 +88,15 @@ impl RelayNode {
         );
 
         let behaviour = RelayNodeBehaviour {
-            relay: relay::Behaviour::new(peer_id, relay::Config::default()),
+            relay: relay::Behaviour::new(peer_id, relay::Config {
+                max_reservations: 1024,
+                max_circuits: 1024,
+                reservation_duration: Duration::from_secs(3600),
+                ..Default::default()
+            }),
             ping: ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(30))),
             identify: identify::Behaviour::new(identify::Config::new(
-                "/securechat/relay/1.0.0".to_string(),
+                "/securechat/id/1.0.0".to_string(),
                 public_key,
             )),
             kad: kad::Behaviour::with_config(peer_id, store, kad_config),
@@ -116,6 +123,16 @@ impl RelayNode {
                     // Always ACK immediately
                     let _ = behaviour.chat.send_response(channel, ChatResponse(vec![]));
 
+                    // Re-announce relay key on any inbound request to ensure clients learn it.
+                    let relay_pub_key = hex::encode(self.privacy_manager.relay_public_key());
+                    let ann_msg = Message::relay_announcement(&relay_pub_key);
+                    let ann_env = MessageEnvelope::unencrypted(
+                        &local_peer_id.to_string(),
+                        &ann_msg
+                    );
+                    info!("Relay: Re-announcing relay key to {}", peer);
+                    behaviour.chat.send_request(&peer, ChatRequest(ann_env));
+
                     if !envelope.encrypted {
                          if let Ok(msg) = Message::from_bytes(&envelope.payload) {
                              if msg.message_type == MessageType::OnionPacket {
@@ -126,24 +143,28 @@ impl RelayNode {
                                          while let Some(event) = self.privacy_manager.next_event() {
                                              match event {
                                                  PrivacyEvent::RelayPacket { next_peer_id, packet_bytes, .. } => {
-                                                     if let Ok(next_peer) = next_peer_id.parse::<PeerId>() {
-                                                         let fwd_msg = Message::onion_packet(&packet_bytes);
-                                                         let fwd_env = MessageEnvelope::unencrypted(
-                                                             &local_peer_id.to_string(),
-                                                             &fwd_msg
-                                                         );
-                                                         debug!("Onion: Relaying to {}", next_peer);
-                                                         behaviour.chat.send_request(&next_peer, ChatRequest(fwd_env));
-                                                     }
-                                                 }
-                                                 PrivacyEvent::DeliverPayload { next_peer_id, payload } => {
-                                                     if let Ok(next_peer) = next_peer_id.parse::<PeerId>() {
-                                                         if let Ok(inner_env) = MessageEnvelope::from_bytes(&payload) {
-                                                             debug!("Onion: Exit Node delivering to {}", next_peer);
-                                                             behaviour.chat.send_request(&next_peer, ChatRequest(inner_env));
-                                                         }
-                                                     }
-                                                 }
+                                                    if let Ok(next_peer) = next_peer_id.parse::<PeerId>() {
+                                                        let fwd_msg = Message::onion_packet(&packet_bytes);
+                                                        let fwd_env = MessageEnvelope::unencrypted(
+                                                            &local_peer_id.to_string(),
+                                                            &fwd_msg
+                                                        );
+                                                        debug!("Onion: Relaying to {}", next_peer);
+                                                        info!("Relay: Forwarding onion packet to {} ({} bytes)", next_peer, packet_bytes.len());
+                                                        let req_id = behaviour.chat.send_request(&next_peer, ChatRequest(fwd_env));
+                                                        info!("Relay: send_request to {} -> {:?}", next_peer, req_id);
+                                                    }
+                                                }
+                                                PrivacyEvent::DeliverPayload { next_peer_id, payload } => {
+                                                    if let Ok(next_peer) = next_peer_id.parse::<PeerId>() {
+                                                        if let Ok(inner_env) = MessageEnvelope::from_bytes(&payload) {
+                                                            debug!("Onion: Exit Node delivering to {}", next_peer);
+                                                            info!("Relay: Delivering exit payload to {} ({} bytes)", next_peer, payload.len());
+                                                            let req_id = behaviour.chat.send_request(&next_peer, ChatRequest(inner_env));
+                                                            info!("Relay: send_request to {} -> {:?}", next_peer, req_id);
+                                                        }
+                                                    }
+                                                }
                                                  PrivacyEvent::Error { message } => {
                                                      warn!("Onion Error: {}", message);
                                                  }
@@ -160,6 +181,10 @@ impl RelayNode {
             SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                 info!("Relay: Connected to peer: {:?}", peer_id);
                 
+                // Ensure we can always reach the peer via our own relay circuit.
+                let circuit_addr = build_relay_circuit_addr(local_peer_id, peer_id);
+                behaviour.kad.add_address(&peer_id, circuit_addr);
+                
                 // Send Relay Announcement (Sphinx Public Key)
                 let relay_pub_key = hex::encode(self.privacy_manager.relay_public_key());
                 let ann_msg = Message::relay_announcement(&relay_pub_key);
@@ -167,7 +192,7 @@ impl RelayNode {
                     &local_peer_id.to_string(),
                     &ann_msg
                 );
-                debug!("Sending Relay Announcement to {}", peer_id);
+                info!("Relay: Sending Relay Announcement to {}", peer_id);
                 behaviour.chat.send_request(&peer_id, ChatRequest(ann_env));
             }
             SwarmEvent::ConnectionClosed { peer_id, .. } => {
@@ -176,4 +201,12 @@ impl RelayNode {
             _ => {}
         }
     }
+}
+
+fn build_relay_circuit_addr(local_peer_id: PeerId, dst_peer_id: PeerId) -> Multiaddr {
+    let mut addr = Multiaddr::empty();
+    addr.push(Protocol::P2p(local_peer_id.into()));
+    addr.push(Protocol::P2pCircuit);
+    addr.push(Protocol::P2p(dst_peer_id.into()));
+    addr
 }

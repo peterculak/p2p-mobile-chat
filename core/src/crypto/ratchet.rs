@@ -99,10 +99,16 @@ impl DoubleRatchet {
     }
 
     /// Initialize as the receiver (Bob) with shared secret from X3DH
-    pub fn init_bob(shared_secret: &[u8; 32], signed_prekey: &StaticSecret) -> Self {
+    /// Now accepts Alice's ratchet public key to perform initial DH ratchet,
+    /// allowing Bob to both send and receive from the start.
+    pub fn init_bob(
+        shared_secret: &[u8; 32], 
+        signed_prekey: &StaticSecret,
+        alice_ratchet_key: &X25519PublicKey,
+    ) -> Self {
         let dh_public = X25519PublicKey::from(signed_prekey);
         
-        Self {
+        let mut ratchet = Self {
             dh_private: signed_prekey.clone(),
             dh_public,
             remote_public: None,
@@ -112,7 +118,14 @@ impl DoubleRatchet {
             send_count: 0,
             recv_count: 0,
             prev_send_count: 0,
-        }
+        };
+        
+        // Perform initial DH ratchet so Bob can both send AND receive
+        // This creates both the receiving chain (for Alice's messages) and
+        // the sending chain (for Bob's messages)
+        ratchet.dh_ratchet(alice_ratchet_key).expect("Initial DH ratchet failed");
+        
+        ratchet
     }
 
     /// Get our current DH public key
@@ -122,8 +135,13 @@ impl DoubleRatchet {
 
     /// Encrypt a message
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<EncryptedPayload, RatchetError> {
+        tracing::info!("DoubleRatchet::encrypt: sending_chain={}, receiving_chain={}, remote_public={}", 
+            self.sending_chain.is_some(), self.receiving_chain.is_some(), self.remote_public.is_some());
         let chain = self.sending_chain.as_mut()
-            .ok_or(RatchetError::NotInitialized)?;
+            .ok_or_else(|| {
+                tracing::error!("DoubleRatchet::encrypt: FAILED - sending_chain is None!");
+                RatchetError::NotInitialized
+            })?;
         
         let message_key = chain.next();
         let ciphertext = Self::aead_encrypt(&message_key, plaintext)?;
@@ -327,9 +345,11 @@ mod tests {
             alice_x3dh.shared_secret(),
             &bob_signed_prekey.public_key(),
         );
+        let alice_ratchet_key = alice_ratchet.public_key();
         let mut bob_ratchet = DoubleRatchet::init_bob(
             bob_x3dh.shared_secret(),
             bob_signed_prekey.private_key(),
+            &alice_ratchet_key,
         );
         
         // Alice sends message
@@ -366,9 +386,11 @@ mod tests {
             alice_x3dh.shared_secret(),
             &bob_signed_prekey.public_key(),
         );
+        let alice_ratchet_key = alice.public_key();
         let mut bob = DoubleRatchet::init_bob(
             bob_x3dh.shared_secret(),
             bob_signed_prekey.private_key(),
+            &alice_ratchet_key,
         );
         
         // Multiple messages back and forth
@@ -406,9 +428,11 @@ mod tests {
             alice_x3dh.shared_secret(),
             &bob_signed_prekey.public_key(),
         );
+        let alice_ratchet_key = alice.public_key();
         let mut bob = DoubleRatchet::init_bob(
             bob_x3dh.shared_secret(),
             bob_signed_prekey.private_key(),
+            &alice_ratchet_key,
         );
         
         // Send a few messages to advance the ratchet

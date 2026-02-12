@@ -12,6 +12,8 @@ use libp2p::{
     quic,
     yamux,
     PeerId,
+    Multiaddr,
+    multiaddr::Protocol,
     Transport,
     SwarmBuilder,
     kad,
@@ -29,7 +31,7 @@ use securechat_core::network::relay_node::{RelayNode, RelayNodeBehaviour, RelayN
 async fn main() -> Result<(), Box<dyn Error>> {
     // Initialize logging
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("relay_server=info".parse().unwrap_or_else(|_| "info".parse().unwrap())))
+        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .try_init();
 
     // Check for existing identity file
@@ -76,7 +78,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         behaviour,
         peer_id,
         libp2p::swarm::Config::with_tokio_executor()
-            .with_idle_connection_timeout(Duration::from_secs(30)),
+            .with_idle_connection_timeout(Duration::from_secs(1800)),
     );
 
     // Listen on all interfaces
@@ -85,10 +87,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // QUIC (UDP)
     swarm.listen_on("/ip4/0.0.0.0/udp/4001/quic-v1".parse()?)?;
 
+    // Announce External Address (Public IP) to ensure circuits form correctly
+    let public_addr_tcp: Multiaddr = "/ip4/90.250.133.218/tcp/4001".parse()?;
+    let public_addr_quic: Multiaddr = "/ip4/90.250.133.218/udp/4001/quic-v1".parse()?;
+    swarm.add_external_address(public_addr_tcp);
+    swarm.add_external_address(public_addr_quic);
+
     info!("Listening on TCP/UDP port 4001...");
 
     loop {
         let event = swarm.select_next_some().await;
+
+        if let SwarmEvent::ConnectionEstablished { peer_id: remote, .. } = &event {
+            let circuit_addr = build_relay_circuit_addr(peer_id, *remote);
+            swarm.add_peer_address(*remote, circuit_addr);
+            info!("Relay: Added circuit address for peer {}", remote);
+        }
+
         relay_node.handle_swarm_event(peer_id, swarm.behaviour_mut(), event);
     }
+}
+
+fn build_relay_circuit_addr(local_peer_id: PeerId, dst_peer_id: PeerId) -> Multiaddr {
+    let mut addr = Multiaddr::empty();
+    addr.push(Protocol::P2p(local_peer_id.into()));
+    addr.push(Protocol::P2pCircuit);
+    addr.push(Protocol::P2p(dst_peer_id.into()));
+    addr
 }

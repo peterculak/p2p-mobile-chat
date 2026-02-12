@@ -124,7 +124,7 @@ impl PrivacyManager {
     /// Register a peer as a relay node
     pub fn register_relay(&mut self, peer_id: &str, public_key: [u8; 32]) {
         self.relay_registry.write().unwrap().register(peer_id.to_string(), public_key);
-        debug!("Registered relay: {} (total: {})", 
+        info!("Registered relay: {} (total: {})", 
             peer_id, self.relay_registry.read().unwrap().count());
     }
     
@@ -184,6 +184,11 @@ impl PrivacyManager {
                 
                 debug!("Created onion packet for {} via {} ({} hops)", 
                     destination_peer_id, entry_peer_id, circuit.hops.len());
+                info!(
+                    "Onion: Raw packet size {} bytes (fixed size {})",
+                    raw_packet_bytes.len(),
+                    obfuscation::FIXED_PACKET_SIZE
+                );
                 
                 // PAD to FIXED_PACKET_SIZE
                 // Use generate_decoy to get random bytes, then overwrite with packet
@@ -221,7 +226,7 @@ impl PrivacyManager {
             return false;
         }
 
-        info!("PrivacyManager: Handing packet to relay_handler...");
+        info!("PrivacyManager: Handing packet to relay_handler (size={})...", packet_bytes.len());
         let success = self.relay_handler.handle_packet(packet_bytes);
         
         // Process relay handler events
@@ -234,8 +239,9 @@ impl PrivacyManager {
                     } else {
                         fwd.delay_ms
                     };
-                    
+
                     info!("PrivacyManager: Forwarding packet to {} (delay: {}ms)", next_peer_id, delay_ms);
+                    info!("PrivacyManager: Forward packet size {}", fwd.packet_bytes.len());
                     
                     let mut packet_bytes = fwd.packet_bytes;
                     if packet_bytes.len() < obfuscation::FIXED_PACKET_SIZE {
@@ -253,6 +259,7 @@ impl PrivacyManager {
                 RelayEvent::ForwardPayload(fwd) => {
                     let next_peer_id = sphinx_wrapper::bytes_to_peer_id(&fwd.next_address);
                     info!("PrivacyManager: Exit node role - delivering payload to {}", next_peer_id);
+                    info!("PrivacyManager: Exit payload size {}", fwd.packet_bytes.len());
                     self.events.push(PrivacyEvent::DeliverPayload {
                         next_peer_id,
                         payload: fwd.packet_bytes,

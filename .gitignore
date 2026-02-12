@@ -57,3 +57,7 @@ SecureChatApp/build/
 
 # Test artifacts
 *.log
+
+# Local identity and persistence
+*.key
+peers_*.json

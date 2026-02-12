@@ -15,6 +15,7 @@ pub mod messaging;
 pub mod privacy;
 pub mod api;
 pub mod logger;
+pub mod util;
 
 // Re-export logger types
 pub use logger::{init_logger, CoreLogger};

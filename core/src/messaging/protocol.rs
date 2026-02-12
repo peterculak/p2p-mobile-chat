@@ -145,6 +145,7 @@ pub struct MessageEnvelope {
     /// Is this encrypted?
     pub encrypted: bool,
     /// Encrypted payload (if encrypted) or raw message JSON
+    #[serde(with = "crate::util::serde_hex")]
     pub payload: Vec<u8>,
     /// Encrypted message header (if encrypted)
     pub encrypted_header: Option<EncryptedMessageHeader>,

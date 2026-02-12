@@ -54,15 +54,11 @@ impl NetworkConfig {
     pub fn global() -> Self {
         Self {
             listen_port: 0,
-            enable_mdns: true, // Keep mDNS for local WiFi discovery if available
+            enable_mdns: false, 
             enable_kad: true,
             bootstrap_peers: vec![
                 // PRIVATE RELAY CONFIGURATION
-                // The Simulator (Wi-Fi) will connect to this local IP.
-                // For 5G, replace '192.168.1.149' with your Public IP or use a VPN.
-                "/ip4/192.168.1.149/tcp/4001/p2p/12D3KooWMDgKCqgv6e9oGESb9TYNcUuTWiwEtqWk3tnMWAWkMf3Y".to_string(),
-                // Also add QUIC for better cellular performance
-                "/ip4/192.168.1.149/udp/4001/quic-v1/p2p/12D3KooWMDgKCqgv6e9oGESb9TYNcUuTWiwEtqWk3tnMWAWkMf3Y".to_string(),
+                "/ip4/90.250.133.218/tcp/4001/p2p/12D3KooWMDgKCqgv6e9oGESb9TYNcUuTWiwEtqWk3tnMWAWkMf3Y".to_string(),
             ],
             idle_timeout: Duration::from_secs(1800),
             enable_onion_routing: true,

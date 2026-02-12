@@ -9,11 +9,17 @@ class ChatViewModel: ObservableObject {
     @Published var selectedPeerId: String?
     @Published var searchText = ""
     @Published var prekeyBundleJson: String?
+    @Published var myPeerId: String = ""
     
     // Messaging API instance
     private var messaging: MessagingApi?
     private var cancellables = Set<AnyCancellable>()
     private var pollTimer: Timer?
+    private let backgroundQueue = DispatchQueue(label: "com.securechat.messaging", qos: .userInitiated)
+    private var isPolling = false
+    private let pendingLock = NSLock()
+    private var pendingNetworkMessages: [(peerId: String, data: Data)] = []
+    private var pendingSessionRequests: [String] = []
     
     // Reference to app model for network status
     var appViewModel: AppViewModel?
@@ -41,6 +47,7 @@ class ChatViewModel: ObservableObject {
         appViewModel.$peerId
             .receive(on: RunLoop.main)
             .sink { [weak self] peerId in
+                self?.myPeerId = peerId
                 if !peerId.isEmpty && self?.messaging == nil {
                     self?.initializeMessaging(peerId: peerId)
                 }
@@ -59,38 +66,85 @@ class ChatViewModel: ObservableObject {
             NSLog("PreKey Bundle: %@", bundle)
         }
         
-        // Start polling for messaging events
-        self.pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            self?.pollEvents()
+        // Start polling for messaging events on background thread
+        if !isPolling {
+            isPolling = true
+            backgroundQueue.async { [weak self] in
+                while let self = self, self.isPolling {
+                    self.pollEvents()
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+            }
+        }
+
+        // Flush any pending network messages that arrived before messaging init.
+        pendingLock.lock()
+        let queuedMessages = pendingNetworkMessages
+        pendingNetworkMessages.removeAll()
+        let uniquePeers = Array(Set(pendingSessionRequests))
+        pendingSessionRequests.removeAll()
+        pendingLock.unlock()
+
+        if !queuedMessages.isEmpty {
+            LogManager.shared.info("Flushing \(queuedMessages.count) pending network messages", context: "ChatViewModel")
+            for item in queuedMessages {
+                ingestNetworkMessage(peerId: item.peerId, data: item.data)
+            }
+        }
+        
+        if !uniquePeers.isEmpty {
+            LogManager.shared.info("Flushing \(uniquePeers.count) pending session requests", context: "ChatViewModel")
+            for peerId in uniquePeers {
+                requestSession(peerId: peerId)
+            }
         }
     }
     
     private func pollEvents() {
         guard let messaging = messaging else { return }
         
+        // 1. Check pending session requests
+        pendingLock.lock()
+        let pending = pendingSessionRequests
+        pendingLock.unlock()
+
+        if !pending.isEmpty {
+            if let appVM = appViewModel {
+                 LogManager.shared.debug("Poll: Pending sessions: \(pending), Connected: \(appVM.connectedPeers)", context: "ChatViewModel")
+            }
+            
+            for peerId in pending {
+                if let appVM = appViewModel, appVM.connectedPeers.contains(peerId) {
+                    do {
+                        LogManager.shared.info("Retrying pending session request for \(peerId)...", context: "ChatViewModel")
+                        try messaging.requestSession(peerId: peerId)
+                        LogManager.shared.info("Retrying pending session request for \(peerId) - SUCCESS", context: "ChatViewModel")
+                        
+                        pendingLock.lock()
+                        if let idx = pendingSessionRequests.firstIndex(of: peerId) {
+                            pendingSessionRequests.remove(at: idx)
+                        }
+                        pendingLock.unlock()
+                    } catch {
+                        LogManager.shared.error("Retrying session for \(peerId) failed: \(error)", context: "ChatViewModel")
+                    }
+                }
+            }
+        }
+        
         while let event = messaging.nextEvent() {
             DispatchQueue.main.async { [weak self] in
+                LogManager.shared.debug("Messaging event: \(String(describing: event))", context: "ChatViewModel")
                 self?.handleEvent(event)
             }
         }
         
         // Handle outgoing messages
         while let outgoing = messaging.nextOutgoing() {
-            // Check if onion routing is enabled via appViewModel
-            if let app = appViewModel, app.isOnionEnabled, 
-               let privacy = app.privacyManager, privacy.canBuildCircuit() {
-                
-                LogManager.shared.info("Chat: Wrapping outgoing message for \(outgoing.peerId) in onion packet", context: "ChatViewModel")
-                if let onion = privacy.wrapMessage(payload: outgoing.data, destinationPeerId: outgoing.peerId) {
-                    LogManager.shared.info("Chat: Sending onion packet via \(onion.entryPeerId)", context: "ChatViewModel")
-                    sendOnionNetworkMessage(entryPeerId: onion.entryPeerId, packetBytes: onion.packetBytes)
-                } else {
-                    LogManager.shared.error("Chat: Failed to wrap message in onion packet, falling back to direct", context: "ChatViewModel")
-                    sendNetworkMessage(peerId: outgoing.peerId, data: outgoing.data)
-                }
-            } else {
-                sendNetworkMessage(peerId: outgoing.peerId, data: outgoing.data)
-            }
+            LogManager.shared.info("Outgoing message dequeued for \(outgoing.peerId), bytes=\(outgoing.data.count)", context: "ChatViewModel")
+            // Send directly; Rust core will onion-route if enabled.
+            LogManager.shared.info("Chat: Sending direct message to \(outgoing.peerId), bytes=\(outgoing.data.count)", context: "ChatViewModel")
+            sendNetworkMessage(peerId: outgoing.peerId, data: outgoing.data)
         }
     }
     
@@ -101,6 +155,7 @@ class ChatViewModel: ObservableObject {
         do {
             // Use the new helper to wrap in an unencrypted OnionPacket envelope
             let envelopeData = messaging.createOnionEnvelope(packetBytes: packetBytes)
+            LogManager.shared.info("Chat: Sending onion envelope to \(entryPeerId), bytes=\(envelopeData.count)", context: "ChatViewModel")
             try network.sendMessage(peerId: entryPeerId, data: envelopeData)
         } catch {
             print("Failed to send onion packet: \(error)")
@@ -120,29 +175,39 @@ class ChatViewModel: ObservableObject {
     private func handleEvent(_ event: MessagingApiEvent) {
         switch event {
         case .messageReceived(let fromPeerId, let text, let id):
+            LogManager.shared.info("Messaging: MessageReceived from \(fromPeerId), id=\(id)", context: "ChatViewModel")
             addMessage(peerId: fromPeerId, text: text, isMe: false, id: id)
             refreshContacts()
             
         case .messageSent(let toPeerId, let messageId):
+            LogManager.shared.info("Messaging: MessageSent to \(toPeerId), id=\(messageId)", context: "ChatViewModel")
             updateMessageStatus(peerId: toPeerId, messageId: messageId, status: .sent)
             
         case .sessionEstablished(let peerId):
             print("Session established with \(peerId)")
+            LogManager.shared.info("Messaging: SessionEstablished with \(peerId)", context: "ChatViewModel")
             refreshContacts()
             
+            // BUG FIX 3: Retry all failed/sending messages for this peer
+            retryPendingMessages(for: peerId)
+            
         case .deliveryReceipt(let peerId, let messageId):
+            LogManager.shared.info("Messaging: DeliveryReceipt from \(peerId), id=\(messageId)", context: "ChatViewModel")
             updateMessageStatus(peerId: peerId, messageId: messageId, status: .delivered)
             
-        case .relayAnnouncement(let peerId, let public_key_hex):
+        case .relayAnnouncement(let peerId, let publicKeyHex):
             print("Received relay announcement from \(peerId)")
-            appViewModel?.privacyManager?.registerRelay(peerId: peerId, publicKeyHex: public_key_hex)
+            LogManager.shared.info("Messaging: RelayAnnouncement from \(peerId), key=\(publicKeyHex.prefix(12))...", context: "ChatViewModel")
+            appViewModel?.privacyManager?.registerRelay(peerId: peerId, publicKeyHex: publicKeyHex)
             
         case .onionPacketReceived(let data):
             print("Received onion packet via messaging, passing to privacy manager")
+            LogManager.shared.info("Messaging: OnionPacketReceived size=\(data.count)", context: "ChatViewModel")
             let _ = appViewModel?.privacyManager?.processIncoming(packetBytes: data)
             
         case .error(let message):
             print("Messaging error: \(message)")
+            LogManager.shared.error("Messaging error: \(message)", context: "ChatViewModel")
         }
     }
     
@@ -196,6 +261,50 @@ class ChatViewModel: ObservableObject {
                 print("[DEBUG_ERROR] Failed to send message: \(error)")
                 updateMessageStatus(peerId: peerId, messageId: tempId, status: .failed)
             }
+        }
+    }
+    
+    func requestSession(peerId: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        LogManager.shared.info("[\(timestamp)] TRACE: requestSession called for \(peerId)", context: "ChatViewModel")
+        
+        if peerId == myPeerId {
+            LogManager.shared.warn("Ignoring session request to self.", context: "ChatViewModel")
+            return
+        }
+        
+        // BUG FIX 2: Remove connectedPeers gate - just try immediately
+        // The network layer will fail if not connected, which is already logged
+        
+        guard let messaging = messaging else {
+            LogManager.shared.info("TRACE: Messaging API not initialized yet - queuing session request", context: "ChatViewModel")
+            pendingLock.lock()
+            if !pendingSessionRequests.contains(peerId) {
+                pendingSessionRequests.append(peerId)
+            }
+            pendingLock.unlock()
+            return
+        }
+        
+        do {
+            LogManager.shared.info("TRACE: Handing session request to Rust core for \(peerId)...", context: "ChatViewModel")
+            try messaging.requestSession(peerId: peerId)
+            LogManager.shared.info("TRACE: Rust core accepted session request for \(peerId)", context: "ChatViewModel")
+            
+            // If successful, ensure it's not in pendingSessionRequests anymore
+            pendingLock.lock()
+            if let idx = pendingSessionRequests.firstIndex(of: peerId) {
+                pendingSessionRequests.remove(at: idx)
+            }
+            pendingLock.unlock()
+        } catch {
+            LogManager.shared.error("TRACE: Rust core REJECTED session request for \(peerId): \(error)", context: "ChatViewModel")
+            // Queue for retry
+            pendingLock.lock()
+            if !pendingSessionRequests.contains(peerId) {
+                pendingSessionRequests.append(peerId)
+            }
+            pendingLock.unlock()
         }
     }
     
@@ -270,15 +379,63 @@ class ChatViewModel: ObservableObject {
     func ingestNetworkMessage(peerId: String, data: Data) {
         LogManager.shared.debug("ingestNetworkMessage from \(peerId), len: \(data.count)", context: "ChatViewModel")
         guard let messaging = messaging else {
-            LogManager.shared.error("Messaging is nil!", context: "ChatViewModel")
+            pendingLock.lock()
+            pendingNetworkMessages.append((peerId: peerId, data: data))
+            pendingLock.unlock()
             return
         }
         do {
             let dataArray = [UInt8](data)
             try messaging.handleIncoming(fromPeerId: peerId, data: dataArray)
-            LogManager.shared.debug("handleIncoming success for \(peerId)", context: "ChatViewModel")
+            LogManager.shared.debug("handleIncoming success for \(peerId), len: \(data.count)", context: "ChatViewModel")
+            // Immediately flush any outgoing responses (e.g., HandshakeResponse)
+            while let outgoing = messaging.nextOutgoing() {
+                LogManager.shared.info("Outgoing message dequeued for \(outgoing.peerId), bytes=\(outgoing.data.count)", context: "ChatViewModel")
+                LogManager.shared.info("Chat: Sending direct message to \(outgoing.peerId), bytes=\(outgoing.data.count)", context: "ChatViewModel")
+                sendNetworkMessage(peerId: outgoing.peerId, data: outgoing.data)
+            }
         } catch {
             LogManager.shared.error("Failed to handle incoming message: \(error.localizedDescription)", context: "ChatViewModel")
+        }
+    }
+    
+    // BUG FIX 3: Retry pending messages when session is established
+    private func retryPendingMessages(for peerId: String) {
+        guard let messaging = messaging else { return }
+        guard let messageList = messages[peerId] else { return }
+        
+        let failedMessages = messageList.filter { $0.isMe && ($0.status == .failed || $0.status == .sending) }
+        
+        if failedMessages.isEmpty {
+            return
+        }
+        
+        LogManager.shared.info("Retrying \(failedMessages.count) pending messages for \(peerId)", context: "ChatViewModel")
+        
+        for message in failedMessages {
+            do {
+                let newId = try messaging.sendMessage(peerId: peerId, text: message.text)
+                LogManager.shared.info("Retry succeeded for message \(message.id), new ID: \(newId)", context: "ChatViewModel")
+                
+                // Update the message status
+                if let index = messages[peerId]?.firstIndex(where: { $0.id == message.id }) {
+                    messages[peerId]?[index].status = .sent
+                }
+            } catch {
+                LogManager.shared.error("Retry failed for message \(message.id): \(error)", context: "ChatViewModel")
+            }
+        }
+    }
+    
+    // BUG FIX 2: Handle peer connected event to retry pending session requests
+    func handlePeerConnected(peerId: String) {
+        pendingLock.lock()
+        let hasPending = pendingSessionRequests.contains(peerId)
+        pendingLock.unlock()
+        
+        if hasPending {
+            LogManager.shared.info("Peer \(peerId) connected - retrying pending session request", context: "ChatViewModel")
+            requestSession(peerId: peerId)
         }
     }
 }

@@ -30,9 +30,15 @@ impl MessageHandler {
                 .ok_or(HandlerError::NoSession)?;
             
             let plaintext = message.to_bytes();
+            tracing::info!("prepare_outgoing: encrypting {} bytes for {}", plaintext.len(), recipient_peer_id);
             let encrypted = session.encrypt(&plaintext)
-                .map_err(|e: SessionError| HandlerError::Encryption(e.to_string()))?;
+                .map_err(|e: SessionError| {
+                    let err_msg = e.to_string();
+                    tracing::error!("prepare_outgoing: Encryption FAILED for {}: {}", recipient_peer_id, err_msg);
+                    HandlerError::Encryption(err_msg)
+                })?;
             
+            tracing::info!("prepare_outgoing: encryption SUCCESS for {}", recipient_peer_id);
             Ok(MessageEnvelope::encrypted(&self.peer_id, &encrypted))
         } else {
             // Send unencrypted (only for session init messages)

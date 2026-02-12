@@ -168,14 +168,19 @@ impl OneTimePreKey {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PreKeyBundle {
     /// Identity public key (X25519)
+    #[serde(with = "crate::util::serde_hex::x25519")]
     pub identity_key: X25519PublicKey,
     /// Identity verifying key (Ed25519)
+    #[serde(with = "crate::util::serde_hex::verifying_key")]
     pub identity_verifying_key: VerifyingKey,
     /// Signed prekey
+    #[serde(with = "crate::util::serde_hex::x25519")]
     pub signed_prekey: X25519PublicKey,
     pub signed_prekey_id: u32,
+    #[serde(with = "crate::util::serde_hex::signature")]
     pub signed_prekey_signature: Signature,
     /// Optional one-time prekey
+    #[serde(with = "crate::util::serde_hex::otpk")]
     pub one_time_prekey: Option<(u32, X25519PublicKey)>,
 }
 

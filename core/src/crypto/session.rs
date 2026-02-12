@@ -70,9 +70,11 @@ impl Session {
         ).map_err(|e| SessionError::X3DH(e))?;
         
         // Initialize double ratchet as Bob
+        // Pass Alice's ratchet key so Bob can create his sending chain immediately
         let ratchet = DoubleRatchet::init_bob(
             x3dh_session.shared_secret(),
             signed_prekey.private_key(),
+            &initial_msg.ratchet_key,
         );
         
         Ok(Self {
