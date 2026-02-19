@@ -759,27 +759,80 @@ impl P2PNode {
                             }
                             Some(NodeCommand::Dial(addr)) => {
                                 if let Ok(multiaddr) = addr.parse::<Multiaddr>() {
-                                    // Extract PeerID if present in the multiaddr
-                                    if let Some(peer_id) = multiaddr.iter().last().and_then(|p| {
-                                        if let libp2p::multiaddr::Protocol::P2p(peer_id) = p {
-                                            Some(peer_id)
-                                        } else {
-                                            None
-                                        }
-                                    }) {
-                                        info!("Dial: Explicitly adding address for {} to Kademlia: {}", peer_id, multiaddr);
-                                        node_swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr.clone());
-                                    } else {
-                                        warn!("Dial: No PeerID found in address {}, proceeding with raw dial.", multiaddr);
-                                    }
+                                    // For p2p-circuit addresses, we MUST register the relay's
+                                    // routable address in the peer store BEFORE dialling.
+                                    // Otherwise libp2p throws MissingRelayAddr.
+                                    // Address format: /ip4/{relay_ip}/tcp/{port}/p2p/{relay_peer}/p2p-circuit/p2p/{dest_peer}
+                                    let protocols: Vec<_> = multiaddr.iter().collect();
+                                    let has_circuit = protocols.iter().any(|p| matches!(p, Protocol::P2pCircuit));
                                     
-                                    if let Err(e) = node_swarm.dial(multiaddr) {
-                                        warn!("Failed to dial: {e}");
+                                    if has_circuit {
+                                        // Split at P2pCircuit: everything before = relay addr, last P2p = dest peer
+                                        let mut relay_addr = Multiaddr::empty();
+                                        let mut relay_peer_id: Option<PeerId> = None;
+                                        let mut dest_peer_id: Option<PeerId> = None;
+                                        let mut past_circuit = false;
+                                        
+                                        for protocol in &protocols {
+                                            if matches!(protocol, Protocol::P2pCircuit) {
+                                                past_circuit = true;
+                                                // relay_addr is now complete (up to and including relay's /p2p/...)
+                                                // extract relay peer from the last P2p before circuit
+                                                if let Some(Protocol::P2p(pid)) = relay_addr.iter().last() {
+                                                    relay_peer_id = Some(pid);
+                                                }
+                                                continue;
+                                            }
+                                            if past_circuit {
+                                                if let Protocol::P2p(pid) = protocol {
+                                                    dest_peer_id = Some(*pid);
+                                                }
+                                            } else {
+                                                relay_addr.push(protocol.clone());
+                                            }
+                                        }
+                                        
+                                        // Register relay's routable address so libp2p can find it
+                                        if let Some(relay_pid) = relay_peer_id {
+                                            // Strip the /p2p/... suffix to get just the transport addr
+                                            let relay_transport_addr: Multiaddr = relay_addr.iter()
+                                                .take_while(|p| !matches!(p, Protocol::P2p(_)))
+                                                .collect();
+                                            info!("Dial: Registering relay {} at {} before circuit dial", relay_pid, relay_transport_addr);
+                                            node_swarm.behaviour_mut().kad.add_address(&relay_pid, relay_transport_addr.clone());
+                                            // Also ensure the relay is dialled/connected
+                                            if !node_swarm.is_connected(&relay_pid) {
+                                                let _ = node_swarm.dial(relay_addr.clone());
+                                            }
+                                        }
+                                        
+                                        // Register dest peer's circuit address  
+                                        if let Some(dest_pid) = dest_peer_id {
+                                            info!("Dial: Registering dest peer {} circuit address in Kademlia", dest_pid);
+                                            node_swarm.behaviour_mut().kad.add_address(&dest_pid, multiaddr.clone());
+                                        }
+                                        
+                                        info!("Dial: Dialling circuit address {}", multiaddr);
+                                        if let Err(e) = node_swarm.dial(multiaddr) {
+                                            warn!("Failed to dial circuit address: {e}");
+                                        }
+                                    } else {
+                                        // Non-circuit dial: extract PeerID and add address to Kademlia
+                                        if let Some(peer_id) = multiaddr.iter().last().and_then(|p| {
+                                            if let Protocol::P2p(peer_id) = p { Some(peer_id) } else { None }
+                                        }) {
+                                            info!("Dial: Adding address for {} to Kademlia: {}", peer_id, multiaddr);
+                                            node_swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr.clone());
+                                        }
+                                        if let Err(e) = node_swarm.dial(multiaddr) {
+                                            warn!("Failed to dial: {e}");
+                                        }
                                     }
                                 } else {
                                     warn!("Dial: Failed to parse address: {}", addr);
                                 }
                             }
+
                             None => break,
                         }
                     }
