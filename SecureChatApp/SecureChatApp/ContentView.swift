@@ -1545,21 +1545,19 @@ struct ScannerView: View {
                     // Dismiss view
                     self.presentationMode.wrappedValue.dismiss()
                     
-                    // Trigger networking in background AFTER UI update is scheduled
+                    // Register peer as awaiting BEFORE dial so handlePeerConnected
+                    // sends the HandshakeRequest once the circuit is actually open.
+                    // Do NOT call requestSession here — the connection isn't established yet.
+                    self.chatViewModel.registerAwaitingPeer(peerId: peerId)
+                    
+                    // Trigger dial in background (dial() returns as soon as the command is queued)
                     DispatchQueue.global(qos: .userInitiated).async {
                         LogManager.shared.info("TRACE: Background Dial Initiated for \(address)", context: "ScannerView")
                         do {
-                            // Dial - this blocks, so MUST be in background
                             try self.viewModel.networkManager?.dial(address: address)
-                            LogManager.shared.info("Dial succeeded for \(address)", context: "ScannerView")
+                            LogManager.shared.info("Dial queued for \(address)", context: "ScannerView")
                         } catch {
                             LogManager.shared.error("Failed to dial scanned address: \(error)", context: "ScannerView")
-                        }
-                        
-                        // Queue the session request back on Main Thread
-                        DispatchQueue.main.async {
-                            LogManager.shared.info("TRACE: Triggering requestSession for \(peerId)", context: "ScannerView")
-                            self.chatViewModel.requestSession(peerId: peerId)
                         }
                     }
                 }

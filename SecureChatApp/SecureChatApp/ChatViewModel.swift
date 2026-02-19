@@ -441,6 +441,16 @@ class ChatViewModel: ObservableObject {
         }
     }
     
+    /// Register a peer as awaiting a session — called right after dial() so that
+    /// handlePeerConnected fires the HandshakeRequest once the connection is open.
+    /// Do NOT call requestSession() directly after dial() — the connection doesn't exist yet.
+    func registerAwaitingPeer(peerId: String) {
+        pendingLock.lock()
+        awaitingSessionPeers.insert(peerId)
+        pendingLock.unlock()
+        LogManager.shared.info("Registered \(peerId) as awaiting session (will send handshake on connect)", context: "ChatViewModel")
+    }
+    
     // Handle peer connected event to retry pending/awaiting session requests
     func handlePeerConnected(peerId: String) {
         pendingLock.lock()
@@ -449,7 +459,7 @@ class ChatViewModel: ObservableObject {
         pendingLock.unlock()
         
         if hasPending || isAwaiting {
-            LogManager.shared.info("Peer \(peerId) connected - retrying session request (pending=\(hasPending), awaiting=\(isAwaiting))", context: "ChatViewModel")
+            LogManager.shared.info("Peer \(peerId) connected - sending session handshake (pending=\(hasPending), awaiting=\(isAwaiting))", context: "ChatViewModel")
             requestSession(peerId: peerId)
         }
     }
