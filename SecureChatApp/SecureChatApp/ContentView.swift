@@ -1254,17 +1254,38 @@ final class DebugLogStore: ObservableObject {
     static let shared = DebugLogStore()
     @Published var lines: [String] = []
     
+    // File path in Documents — survives app restarts and network changes
+    private let logFileURL: URL = {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("securechat_debug.log")
+    }()
+    
+    init() {
+        // Clear old log on fresh start
+        try? "=== SecureChat Log Started \(Date()) ===\n".write(to: logFileURL, atomically: false, encoding: .utf8)
+    }
+    
     func add(_ line: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let entry = "\(timestamp) \(line)\n"
+        // Append to file (non-critical, best-effort)
+        if let data = entry.data(using: .utf8),
+           let fh = try? FileHandle(forWritingTo: logFileURL) {
+            fh.seekToEndOfFile()
+            fh.write(data)
+            fh.closeFile()
+        }
         DispatchQueue.main.async {
             self.lines.append(line)
-            if self.lines.count > 200 {
-                self.lines.removeFirst(self.lines.count - 200)
+            if self.lines.count > 500 {
+                self.lines.removeFirst(self.lines.count - 500)
             }
         }
     }
     
     var joined: String {
-        lines.joined(separator: "\n")
+        // Serve from file so old logs (before network change) are included
+        (try? String(contentsOf: logFileURL, encoding: .utf8)) ?? lines.joined(separator: "\n")
     }
 }
 
