@@ -155,6 +155,19 @@ impl NetworkManager {
         *running = false;
     }
 
+    /// Reconnect to all bootstrap/relay peers after a network interface change.
+    /// Safe to call while running — sends a command through the event loop channel,
+    /// no stop/start required, no risk of deadlock.
+    pub fn reconnect(&self) {
+        if !*self.is_running.lock().unwrap() {
+            return;
+        }
+        let mut node = self.node.lock().unwrap();
+        self.runtime.block_on(async {
+            let _ = node.reconnect().await;
+        });
+    }
+
     /// Check if the node is running
     pub fn is_running(&self) -> bool {
         *self.is_running.lock().unwrap()

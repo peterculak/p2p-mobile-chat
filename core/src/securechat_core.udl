@@ -99,6 +99,9 @@ interface NetworkManager {
     // Send a message to a peer
     [Throws=NetworkError]
     void send_message(string peer_id, sequence<u8> data);
+
+    // Reconnect to all bootstrap/relay peers (safe to call while running)
+    void reconnect();
 };
 
 // Messaging API

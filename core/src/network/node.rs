@@ -61,6 +61,8 @@ enum NodeCommand {
     Dial(String),
     /// Send a message to a peer
     SendMessage { peer_id: String, envelope: MessageEnvelope },
+    /// Reconnect to all bootstrap/relay peers (used after network interface change)
+    Reconnect,
 }
 
 /// A P2P network node
@@ -693,6 +695,22 @@ impl P2PNode {
                     // Handle commands
                     cmd = cmd_rx.recv() => {
                         match cmd {
+                            Some(NodeCommand::Reconnect) => {
+                                info!("Reconnect: Network interface changed, re-dialing all bootstrap peers...");
+                                for relay_addr in config_clone.bootstrap_peers.iter() {
+                                    if let Ok(multiaddr) = relay_addr.parse::<Multiaddr>() {
+                                        if let Some(peer_id) = multiaddr.iter().find_map(|p| {
+                                            if let libp2p::multiaddr::Protocol::P2p(id) = p { Some(id) } else { None }
+                                        }) {
+                                            node_swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr.clone());
+                                        }
+                                        match node_swarm.dial(multiaddr.clone()) {
+                                            Ok(_) => info!("Reconnect: Re-dialing {}", relay_addr),
+                                            Err(e) => warn!("Reconnect: Failed to re-dial {}: {}", relay_addr, e),
+                                        }
+                                    }
+                                }
+                            }
                             Some(NodeCommand::Stop) => {
                                 info!("Stopping P2P node");
                                 break;
@@ -805,6 +823,17 @@ impl P2PNode {
     pub async fn stop(&mut self) -> Result<(), String> {
         if let Some(tx) = &self.command_tx {
             tx.send(NodeCommand::Stop)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Reconnect to all bootstrap/relay peers after a network interface change.
+    /// Safe to call while the node is running — does NOT stop/restart the event loop.
+    pub async fn reconnect(&mut self) -> Result<(), String> {
+        if let Some(tx) = &self.command_tx {
+            tx.send(NodeCommand::Reconnect)
                 .await
                 .map_err(|e| e.to_string())?;
         }

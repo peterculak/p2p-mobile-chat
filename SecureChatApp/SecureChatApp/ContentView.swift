@@ -323,36 +323,21 @@ class AppViewModel: ObservableObject {
         
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            LogManager.shared.info("Executing network restart after interface change...", context: "NetworkMonitor")
+            LogManager.shared.info("Network interface changed — reconnecting to relay peers...", context: "NetworkMonitor")
             
-            // Stop the old node and clear state
-            // We do the UI updates on main thread ASYNCHRONOUSLY to avoid deadlocks
-            DispatchQueue.main.async {
-                self.isNetworkRunning = false
-                self.connectedPeers.removeAll()
-                self.listeningAddresses.removeAll()
-            }
+            // Brief pause to let the OS fully bring up the new interface
+            Thread.sleep(forTimeInterval: 1.5)
             
-            // Perform the stop operation on the background thread (it blocks internally)
-            self.networkManager?.stop()
+            // Send Reconnect command through the existing event-loop channel.
+            // This does NOT stop/restart the node — it just re-dials bootstrap/relay
+            // addresses from inside the running swarm event loop. Completely deadlock-safe.
+            self.networkManager?.reconnect()
             
-            // Brief pause to let OS settle the new interface
-            Thread.sleep(forTimeInterval: 1.0)
-            
-            // Restart on background thread
-            do {
-                try self.networkManager?.start()
-                DispatchQueue.main.async {
-                    self.isNetworkRunning = true
-                }
-                LogManager.shared.info("P2P node restarted after network transition", context: "NetworkMonitor")
-            } catch {
-                LogManager.shared.error("Failed to restart P2P node after transition: \(error)", context: "NetworkMonitor")
-            }
+            LogManager.shared.info("Reconnect command sent after network transition", context: "NetworkMonitor")
         }
         
         networkRestartWorkItem = workItem
-        // Debounce: wait 2 seconds before actually restarting
+        // Debounce: wait 2 seconds before reconnecting
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2.0, execute: workItem)
     }
     
