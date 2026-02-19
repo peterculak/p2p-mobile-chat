@@ -464,6 +464,7 @@ struct ContentView: View {
     @State private var showScanner = false
     @State private var showInvitation = false
     @State private var showDebugLogs = false
+    @State private var confettiCounter = 0
     
     var body: some View {
         ZStack {
@@ -508,10 +509,24 @@ struct ContentView: View {
             }
             .accentColor(.accentEnd)
             
-            // Floating debug log toggle
+            // Floating debug log toggle and confetti button
             VStack {
                 Spacer()
                 HStack {
+                    Button(action: {
+                        confettiCounter += 1
+                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+                    }) {
+                        Image(systemName: "party.popper.fill")
+                            .font(.title3)
+                            .padding(12)
+                            .background(Color.black.opacity(0.5))
+                            .foregroundColor(.white)
+                            .clipShape(Circle())
+                    }
+                    .padding(.leading, 16)
+                    .padding(.bottom, 24)
+                    
                     Spacer()
                     Button(action: { showDebugLogs.toggle() }) {
                         Text(showDebugLogs ? "Hide Logs" : "Show Logs")
@@ -531,6 +546,8 @@ struct ContentView: View {
                 DebugLogPanel()
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            
+            ConfettiView(counter: $confettiCounter)
         }
         .sheet(isPresented: $showInvitation) {
             InvitationView(
